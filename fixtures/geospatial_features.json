@@ -1,0 +1,56 @@
+{
+  "features": [
+    {
+      "id": "watercourse-1",
+      "type": "watercourse",
+      "label": "Seasonal drainage ditch",
+      "confidence": "medium",
+      "risk_note": "Potential surface water and access constraint after heavy rain."
+    },
+    {
+      "id": "slope-1",
+      "type": "slope",
+      "label": "North-west field slope",
+      "confidence": "medium",
+      "risk_note": "Slope may affect vehicle access, temporary works, and manual handling."
+    },
+    {
+      "id": "track-1",
+      "type": "access_track",
+      "label": "Single-width farm track",
+      "confidence": "high",
+      "risk_note": "Check turning area, passing points, and gate width before delivery."
+    },
+    {
+      "id": "bridge-1",
+      "type": "bridge",
+      "label": "Minor culvert crossing",
+      "confidence": "low",
+      "risk_note": "Imagery suggests a crossing; load limit and condition are unverified."
+    },
+    {
+      "id": "tree-line-1",
+      "type": "vegetation",
+      "label": "Mature tree line",
+      "confidence": "medium",
+      "risk_note": "Could affect sightlines, ecology constraints, and wind exposure."
+    }
+  ],
+  "fallback_features": [
+    {
+      "id": "fallback-access",
+      "type": "access_track",
+      "label": "Fallback access corridor",
+      "confidence": "low",
+      "risk_note": "Live map source failed; verify all access assumptions manually."
+    },
+    {
+      "id": "fallback-water",
+      "type": "watercourse",
+      "label": "Fallback watercourse indicator",
+      "confidence": "low",
+      "risk_note": "Fallback feature only; check official flood and watercourse data."
+    }
+  ]
+}
+

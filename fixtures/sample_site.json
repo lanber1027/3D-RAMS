@@ -1,0 +1,9 @@
+{
+  "siteName": "Demo rural field fixture",
+  "latitude": 52.2053,
+  "longitude": -1.6022,
+  "goal": "Pre-visit RAMS scoping pack",
+  "includePlanningFixture": true,
+  "simulateMapFailure": false,
+  "additionalRequest": ""
+}
