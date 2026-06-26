@@ -3,7 +3,7 @@ import { AlertTriangle, GitBranch, Play, RotateCcw, ShieldCheck } from "lucide-r
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
 const DEFAULT_REQUEST = {
   siteName: "Demo rural field fixture",
@@ -321,4 +321,3 @@ function App() {
 }
 
 export default App;
-

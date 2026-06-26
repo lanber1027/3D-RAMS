@@ -30,6 +30,20 @@ The first slice is intentionally local-first: it runs without AWS credentials, G
 
 ## Quickstart
 
+## Teammate Testing
+
+The easiest teammate test path is GitHub Codespaces. Open the repo in Codespaces, then run:
+
+```bash
+bash scripts/start-dev.sh
+```
+
+Codespaces should forward the frontend on port `5173` and backend on port `8000`. Use [docs/team-test-guide.md](docs/team-test-guide.md) for the scenario checklist and feedback template.
+
+No AWS, Google Maps, Cesium ion token, or real site data is required.
+
+## Local Quickstart
+
 Backend:
 
 ```bash
@@ -91,4 +105,3 @@ See [docs/architecture.md](docs/architecture.md) for the workflow and AWS diagra
 ## Safety Boundary
 
 This project does not produce certified RAMS, emergency response instructions, work approval, or competent-person replacement. It produces an inspectable pre-visit review pack for human review.
-
