@@ -23,6 +23,20 @@ This repo is worked through bounded tasks. For each task, keep the change focuse
 
 Large tasks should be split before implementation. Parallel changes are acceptable only when file ownership is non-overlapping.
 
+## Review Expectations
+
+Before merge, push, teammate share, or demo/submission use, changes should have a clear quality handoff:
+
+- acceptance criteria covered;
+- changed files match the assigned scope;
+- relevant checks run, with skipped checks recorded;
+- real vs mocked behavior still disclosed;
+- no secrets, private notes, client data, or confidential planning content added;
+- no certified RAMS, emergency, legal, financial, medical, or approval-to-work claims added;
+- known risks, blockers, and recommended next action stated.
+
+Small docs-only changes can use a lightweight review, but the public/private boundary still applies.
+
 ## Build Posture
 
 - Keep Demo1 runnable without cloud credentials or live map keys.
