@@ -4,6 +4,12 @@
 
 The first slice is intentionally local-first: it runs without AWS credentials, Google Maps keys, Cesium ion keys, or live planning-portal scraping. The agent uses fixtures so the workflow can be inspected, tested, and extended safely before live integrations are added.
 
+## Problem Statement
+
+Site teams preparing for unfamiliar rural, development, or infrastructure visits have to combine maps, terrain, access routes, planning records, document evidence, and risk notes before they can form a useful briefing. 3D-RAMS explores whether an agent can turn that fragmented digital work into an inspectable 3D pre-visit pack with evidence, annotations, trace, confidence labels, and a visible safety boundary.
+
+Read the full problem statement in [docs/problem-statement.md](docs/problem-statement.md).
+
 ## Demo Workflow
 
 1. User enters a coordinate.
