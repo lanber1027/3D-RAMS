@@ -10,6 +10,12 @@ Site teams preparing for unfamiliar rural, development, or infrastructure visits
 
 Read the full problem statement in [docs/problem-statement.md](docs/problem-statement.md).
 
+## Architecture At A Glance
+
+![3D-RAMS query-to-brief architecture flow](docs/assets/architecture/query-to-brief-flow.svg)
+
+This rendered diagram mirrors the source workflow in [docs/architecture.md](docs/architecture.md). The detailed architecture document remains the source of truth for the full Mermaid diagrams, trust boundaries, real-vs-mocked register, safety gate, and future AWS path.
+
 ## Demo Workflow
 
 1. User enters a coordinate.
