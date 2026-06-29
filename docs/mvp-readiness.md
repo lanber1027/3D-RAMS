@@ -12,6 +12,7 @@ This page is a public-safe readiness snapshot for teammates, judges, and contrib
 | Backend API | Verified | `/health` and `/api/run` are covered by API contract tests. |
 | Agent workflow | Verified in deterministic mode | `scripts/evaluate-demo.py` checks nine scenarios. |
 | Frontend build | Verified | `scripts/check-demo.sh` and CI run the production build. |
+| HTTP runtime smoke | Verified | One-command checks start backend and frontend preview, then verify `/health`, `/api/run`, and the frontend shell. |
 | Public fixture pack | Ready for demo use | `public-lambeth-thames` cached fixture uses public-safe source metadata and no live runtime calls. |
 | Architecture visualizer | Ready for demo use | UI and [architecture.md](architecture.md) show tool sequence, boundaries, trace, and AWS path. |
 | Safety gate | Verified for demo boundary | Unsafe certified RAMS/work-approval requests are blocked in tests and evaluation. |
@@ -44,7 +45,7 @@ Fresh Windows clone:
 powershell -ExecutionPolicy Bypass -File scripts/check-demo.ps1 -Install
 ```
 
-These checks do not require AWS credentials, Google keys, Cesium ion tokens, live planning portals, hosted infrastructure, real site data, or private documents.
+These checks compile code, run backend/API tests, run deterministic evaluation, build the frontend, and start a no-AWS backend/frontend HTTP smoke test. They do not require AWS credentials, Google keys, Cesium ion tokens, live planning portals, hosted infrastructure, real site data, or private documents.
 
 ## Verified Scenarios
 

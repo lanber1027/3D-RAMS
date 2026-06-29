@@ -55,4 +55,7 @@ finally {
     Pop-Location
 }
 
+Write-Host "Running backend/frontend HTTP runtime smoke test"
+python scripts/smoke-runtime.py
+
 Write-Host "3D-RAMS local verification passed."

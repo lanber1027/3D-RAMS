@@ -30,6 +30,8 @@ Keep changes scoped to one purpose. If a change touches backend, frontend, docs,
 
 ## Verification
 
+The standard check compiles backend/scripts, runs backend and API tests, runs deterministic evaluation, builds the frontend, and starts a no-AWS backend/frontend HTTP smoke test.
+
 Codespaces/Linux/macOS:
 
 ```bash

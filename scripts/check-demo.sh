@@ -20,6 +20,7 @@ Runs the local no-AWS verification stack:
   - backend unit and API contract tests
   - deterministic demo evaluation
   - frontend production build
+  - backend/frontend HTTP runtime smoke test
 
 Options:
   --install  Install backend and frontend dependencies before checking.
@@ -67,5 +68,8 @@ echo "Building frontend"
   fi
   npm run build
 )
+
+echo "Running backend/frontend HTTP runtime smoke test"
+python scripts/smoke-runtime.py
 
 echo "3D-RAMS local verification passed."

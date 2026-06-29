@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   verify:
-    name: Backend, evaluation, and frontend build
+    name: Backend, evaluation, frontend build, and runtime smoke
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

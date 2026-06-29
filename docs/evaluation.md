@@ -22,7 +22,7 @@ python scripts/evaluate-demo.py --write docs/evaluation-results/latest.json
 
 ## Continuous Verification
 
-GitHub Actions runs the same deterministic evaluation on pushes and pull requests, alongside backend compile checks, backend unit/API contract tests, and the frontend production build.
+GitHub Actions runs the same deterministic evaluation on pushes and pull requests, alongside backend compile checks, backend unit/API contract tests, the frontend production build, and a no-AWS HTTP runtime smoke test.
 
 The CI workflow does not use AWS credentials, Google Maps keys, live planning portals, or hosted infrastructure.
 
@@ -82,6 +82,7 @@ This keeps the evaluation stable and cheap. It also proves that the app remains 
 ## What This Proves
 
 - The agent workflow is repeatable in local no-key mode.
+- The backend and frontend preview can start over HTTP and serve the default no-AWS runtime path.
 - Output remains inspectable through evidence, source IDs, trace steps, confidence labels, and safety decisions.
 - The default demo uses cached public-safe fixture data and does not make live public-data calls.
 - Bedrock is optional for the MVP and not required for teammate testing.
@@ -92,7 +93,7 @@ This keeps the evaluation stable and cheap. It also proves that the app remains 
 - It does not prove production AWS deployment.
 - It does not prove live planning portal extraction.
 - It does not prove certified RAMS, emergency guidance, legal approval, or competent-person review.
-- It does not prove frontend rendering by itself. Use the teammate guide and browser/mobile checks for UI proof.
+- It does not prove full browser interaction or visual rendering by itself. Use the teammate guide and browser/mobile checks for UI proof.
 
 ## Public Safety Boundary
 

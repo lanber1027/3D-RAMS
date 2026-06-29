@@ -117,7 +117,7 @@ Do not upload real site data, private documents, client material, secrets, or AP
 
 ## Optional Self-Check
 
-If you are comfortable running one extra terminal command, this checks the backend tests, API contract tests, deterministic evaluation, and frontend build.
+If you are comfortable running one extra terminal command, this checks the backend tests, API contract tests, deterministic evaluation, frontend build, and a no-AWS backend/frontend HTTP runtime smoke test.
 
 Codespaces/Linux/macOS:
 
@@ -143,7 +143,7 @@ On a fresh Windows clone, use:
 powershell -ExecutionPolicy Bypass -File scripts/check-demo.ps1 -Install
 ```
 
-This check does not use AWS, Google Maps, live planning portals, hosted infrastructure, real site data, or secrets.
+This check starts local backend and frontend preview servers, then shuts them down. It does not use AWS, Google Maps, live planning portals, hosted infrastructure, real site data, or secrets.
 
 ## Plain-English Repo Map
 
@@ -154,7 +154,8 @@ This check does not use AWS, Google Maps, live planning portals, hosted infrastr
 | `fixtures` | Public-safe cached and synthetic demo data, not client data. |
 | `fixtures/public-lambeth-thames` | Cached public-source fixture pack and attribution files for the Lambeth / Thames example. Runtime makes no live public-data calls. |
 | `scripts/start-dev.sh` | One-command startup script for Codespaces. |
-| `scripts/check-demo.sh` / `scripts/check-demo.ps1` | One-command local verification scripts for tests, evaluation, and frontend build. |
+| `scripts/check-demo.sh` / `scripts/check-demo.ps1` | One-command local verification scripts for tests, evaluation, frontend build, and runtime smoke. |
+| `scripts/smoke-runtime.py` | No-AWS HTTP smoke test for backend health, agent run, and frontend preview shell. |
 | `docs/team-test-guide.md` | This testing checklist. |
 | `.github/ISSUE_TEMPLATE` | Feedback form for teammate testing. |
 | `.devcontainer` | Codespaces setup recipe. |

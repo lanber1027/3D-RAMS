@@ -70,7 +70,7 @@ python scripts/evaluate-demo.py
 
 The evaluation runner covers nine deterministic scenarios, including cached-public happy path, missing planning evidence, map fallback, Bedrock-disabled fallback, unsafe request blocking, low-confidence output, architecture payload shape, and unknown pack fallback. See [docs/evaluation.md](docs/evaluation.md).
 
-GitHub Actions also runs the backend tests, deterministic evaluation, and frontend build on pushes and pull requests. See [docs/mvp-readiness.md](docs/mvp-readiness.md) for the current readiness snapshot, verified scenarios, and remaining gates.
+GitHub Actions also runs the backend tests, deterministic evaluation, frontend build, and HTTP runtime smoke on pushes and pull requests. See [docs/mvp-readiness.md](docs/mvp-readiness.md) for the current readiness snapshot, verified scenarios, and remaining gates.
 
 For contribution expectations, safety boundaries, and handoff checklist, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -97,6 +97,8 @@ On a fresh Windows clone:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/check-demo.ps1 -Install
 ```
+
+The check runs backend compile/tests, deterministic evaluation, frontend production build, and a no-AWS HTTP runtime smoke against the backend and frontend preview.
 
 ## Bedrock Mode
 
