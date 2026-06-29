@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "generate_site_brief input",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "location": {
+      "type": "object",
+      "description": "Resolved site location object."
+    },
+    "hazards": {
+      "type": "array",
+      "description": "Hazard notes returned by the hazard subagent.",
+      "items": {
+        "type": "object"
+      }
+    },
+    "planningText": {
+      "type": ["string", "null"],
+      "description": "Planning/context text used to ground the briefing."
+    },
+    "fixturePack": {
+      "type": ["string", "null"],
+      "description": "Optional cached fixture pack id."
+    }
+  },
+  "required": ["location", "hazards"]
+}

@@ -194,6 +194,36 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertEqual(architecture["nodes"][1]["label"], "AgentCore invocation endpoint")
         self.assertEqual(architecture["edges"][0]["label"], "POST /invocations")
 
+    def test_supervisor_dispatches_direct_tool_groups_in_parallel(self):
+        result = run_site_briefing({"fixturePack": "public-lambeth-thames", "useBedrock": False})
+        dispatch_steps = {
+            step["name"]: step
+            for step in result["trace"]
+            if step["name"] in {"dispatch_parallel_tool_groups", "dispatch_parallel_report_groups"}
+        }
+
+        self.assertEqual(
+            dispatch_steps["dispatch_parallel_tool_groups"]["output"]["groups"],
+            ["geospatial_subagent", "planning_subagent"],
+        )
+        self.assertEqual(
+            dispatch_steps["dispatch_parallel_tool_groups"]["output"]["harnesses"]["geospatial_subagent"],
+            "rams_geospatial_harness",
+        )
+        self.assertEqual(
+            dispatch_steps["dispatch_parallel_report_groups"]["output"]["groups"],
+            ["annotation_subagent", "briefing_subagent"],
+        )
+        self.assertEqual(
+            dispatch_steps["dispatch_parallel_report_groups"]["output"]["harnesses"]["briefing_subagent"],
+            "rams_briefing_harness",
+        )
+        self.assertEqual(
+            dispatch_steps["dispatch_parallel_tool_groups"]["output"]["mode"],
+            "direct-local-harness-adapter",
+        )
+        self.assertEqual(result["runtime"]["subagentExecutionMode"], "direct-local-harness-adapter")
+
     def test_bedrock_mock_mode_updates_briefing_and_trace(self):
         with EnvPatch(
             ENABLE_BEDROCK="true",

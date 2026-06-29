@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "create_annotations input",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "location": {
+      "type": "object",
+      "description": "Resolved site location object."
+    },
+    "hazards": {
+      "type": "array",
+      "description": "Hazard notes returned by the hazard subagent.",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "required": ["location", "hazards"]
+}

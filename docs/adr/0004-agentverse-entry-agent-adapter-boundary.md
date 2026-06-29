@@ -134,6 +134,7 @@ The ASI:ONE / AgentVerse proof of concept has been imported into this repository
 - imported entry runtime source: `app/asi_one_entry_agent`;
 - imported hosted adapter source: `agentverse/hosted_adapter.py`;
 - supervisor Harness source: `app/rams_supervisor_harness`;
+- specialist Harness subagent sources: `app/rams_geospatial_harness`, `app/rams_planning_harness`, `app/rams_hazard_harness`, `app/rams_annotation_harness`, `app/rams_briefing_harness`, and `app/rams_review_harness`;
 - AgentCore config now declares both `rams_supervisor_runtime` and `asi_one_entry_agent` runtimes.
 
 The existing cloud runtime name from the proof of concept is intentionally documented without committing its ARN or AWS account id. The team still needs to decide whether to import the existing deployed runtime into this AgentCore project or redeploy `asi_one_entry_agent` from this repository and update the AgentVerse hosted adapter environment.

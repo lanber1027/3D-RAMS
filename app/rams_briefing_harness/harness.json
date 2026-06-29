@@ -1,0 +1,132 @@
+{
+  "name": "rams_briefing_harness",
+  "model": {
+    "provider": "bedrock",
+    "modelId": "anthropic.claude-3-7-sonnet-20250219-v1:0",
+    "apiFormat": "converse_stream"
+  },
+  "systemPrompt": "You are the 3D-RAMS evidence-backed briefing specialist Harness. Generate concise briefing and evidence payloads grounded in supplied location, hazards, planning context, and sources. Preserve deterministic fallback when Bedrock drafting is disabled.",
+  "tools": [
+    {
+      "type": "inline_function",
+      "name": "generate_site_brief",
+      "config": {
+        "inlineFunction": {
+          "description": "Generate an evidence-backed site briefing and evidence packet from location, hazards, and planning context.",
+          "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "generate_site_brief input",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "location": {
+                "type": "object",
+                "description": "Resolved site location object."
+              },
+              "hazards": {
+                "type": "array",
+                "description": "Hazard notes returned by the hazard subagent.",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "planningText": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Planning/context text used to ground the briefing."
+              },
+              "fixturePack": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Optional cached fixture pack id."
+              }
+            },
+            "required": [
+              "location",
+              "hazards"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "inline_function",
+      "name": "apply_bedrock_briefing",
+      "config": {
+        "inlineFunction": {
+          "description": "Optionally revise a deterministic briefing through Bedrock when explicitly enabled, preserving fallback and safety boundaries.",
+          "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "apply_bedrock_briefing input",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "location": {
+                "type": "object",
+                "description": "Resolved site location object."
+              },
+              "hazards": {
+                "type": "array",
+                "description": "Hazard notes used for optional Bedrock drafting.",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "briefing": {
+                "type": "object",
+                "description": "Deterministic briefing object to retain or revise."
+              },
+              "evidence": {
+                "type": "array",
+                "description": "Evidence objects supporting the briefing.",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "planningText": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Planning/context text used for grounding."
+              },
+              "useBedrock": {
+                "type": "boolean",
+                "default": false,
+                "description": "Whether Bedrock drafting is requested. Demo defaults keep this false."
+              }
+            },
+            "required": [
+              "location",
+              "hazards",
+              "briefing",
+              "evidence"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "skills": [],
+  "allowedTools": [
+    "generate_site_brief",
+    "apply_bedrock_briefing"
+  ],
+  "memory": {
+    "mode": "disabled"
+  },
+  "maxIterations": 5,
+  "maxTokens": 8000,
+  "timeoutSeconds": 240,
+  "truncation": {
+    "strategy": "summarization"
+  },
+  "environmentVariables": {
+    "RUNTIME_DATA_MODE": "fixture_first",
+    "ENABLE_BEDROCK": "false"
+  }
+}

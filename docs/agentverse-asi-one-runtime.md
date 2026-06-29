@@ -22,11 +22,19 @@ The repository now has two AgentCore runtimes:
 | `rams_supervisor_runtime` | `app/rams_supervisor_runtime/` | 3D-RAMS supervisor/report runtime; owns site-review orchestration and visualization payloads. |
 | `asi_one_entry_agent` | `app/asi_one_entry_agent/` | AgentVerse entry runtime imported from the ASI:ONE proof of concept; owns fast conversational intake/delivery behavior. |
 
-The repository now has one Harness config:
+The repository now has one supervisor Harness config plus specialist Harness subagents:
 
 | Harness | Path | Role |
 | --- | --- | --- |
 | `rams_supervisor_harness` | `app/rams_supervisor_harness/` | Target Harness for supervisor orchestration and review workflow. |
+| `rams_geospatial_harness` | `app/rams_geospatial_harness/` | Geospatial specialist for location resolution, geospatial context, and scene configuration. |
+| `rams_planning_harness` | `app/rams_planning_harness/` | Planning/document context specialist. |
+| `rams_hazard_harness` | `app/rams_hazard_harness/` | Hazard and RAMS-scoping evidence specialist. |
+| `rams_annotation_harness` | `app/rams_annotation_harness/` | 3D annotation payload specialist. |
+| `rams_briefing_harness` | `app/rams_briefing_harness/` | Evidence-backed briefing specialist. |
+| `rams_review_harness` | `app/rams_review_harness/` | Independent review-gate Harness. |
+
+The supervisor Harness owns the dispatch plan in `app/rams_supervisor_harness/subagents.json`. The supervisor runtime dispatches through `supervisor_core.subagent_invoker`: local Demo1 defaults to deterministic direct execution, while deployed Harness execution can be enabled with `RAMS_SUBAGENT_EXECUTION_MODE=agentcore_harness` and the deployed Harness ARN mappings.
 
 The imported entry runtime also declares `asi_one_entry_agent_memory` in `agentcore/agentcore.json`, matching the environment variable expected by `app/asi_one_entry_agent/memory/session.py`.
 

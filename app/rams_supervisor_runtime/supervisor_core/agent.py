@@ -1,24 +1,19 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from rams_agent_tools.config import RuntimeConfig
 from rams_agent_tools.fixtures import load_fixture_pack
 from rams_agent_tools.tools import (
-    apply_bedrock_briefing,
     architecture_snapshot,
-    build_scene_config,
-    create_annotations,
-    extract_hazard_notes,
-    generate_site_brief,
-    load_geospatial_features,
-    load_planning_context,
+    harness_for_group,
     normalize_request,
-    resolve_location,
-    safety_gate,
     source_register,
     trace_step,
 )
+
+from .subagent_invoker import build_subagent_invoker
 
 
 def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -34,6 +29,7 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
         request_summary["longitude"] = float(pack_location["longitude"])
 
     config = RuntimeConfig.from_env(request_bedrock=request_summary["useBedrock"])
+    subagents = build_subagent_invoker(config)
     trace: list[dict[str, Any]] = []
 
     if fixture_pack_warning:
@@ -47,46 +43,79 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
             )
         )
 
-    location, step = resolve_location(request, fixture_pack=fixture_pack)
-    trace.append(step)
-
-    features, step = load_geospatial_features(
-        location,
-        simulate_failure=bool(request.get("simulateMapFailure")),
-        fixture_pack=fixture_pack,
+    trace.append(
+        trace_step(
+            "dispatch_parallel_tool_groups",
+            "ok",
+            "Supervisor dispatched initial Harness subagent groups in parallel.",
+            {
+                "mode": subagents.execution_mode,
+                "groups": ["geospatial_subagent", "planning_subagent"],
+                "harnesses": {
+                    "geospatial_subagent": harness_for_group("geospatial_subagent"),
+                    "planning_subagent": harness_for_group("planning_subagent"),
+                },
+            },
+        )
     )
-    trace.append(step)
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="rams-initial-tools") as executor:
+        geospatial_future = executor.submit(subagents.invoke_geospatial, request, fixture_pack=fixture_pack)
+        planning_future = executor.submit(subagents.invoke_planning, request, fixture_pack=fixture_pack)
 
-    scene, step = build_scene_config(location, features, fixture_pack=fixture_pack)
-    trace.append(step)
+        geospatial_result = geospatial_future.result()
+        planning_result = planning_future.result()
 
-    planning_text, step = load_planning_context(
-        include_planning_fixture=bool(request.get("includePlanningFixture", True)),
-        fixture_pack=fixture_pack,
+    location = geospatial_result["location"]
+    features = geospatial_result["features"]
+    scene = geospatial_result["scene"]
+    planning_text = planning_result["planningText"]
+    trace.extend(geospatial_result["trace"])
+    trace.extend(planning_result["trace"])
+
+    hazard_result = subagents.invoke_hazard(planning_text, features, fixture_pack=fixture_pack)
+    hazards = hazard_result["hazards"]
+    trace.extend(hazard_result["trace"])
+
+    trace.append(
+        trace_step(
+            "dispatch_parallel_report_groups",
+            "ok",
+            "Supervisor dispatched report-preparation Harness subagent groups in parallel after hazard extraction.",
+            {
+                "mode": subagents.execution_mode,
+                "groups": ["annotation_subagent", "briefing_subagent"],
+                "harnesses": {
+                    "annotation_subagent": harness_for_group("annotation_subagent"),
+                    "briefing_subagent": harness_for_group("briefing_subagent"),
+                },
+            },
+        )
     )
-    trace.append(step)
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="rams-report-tools") as executor:
+        annotations_future = executor.submit(subagents.invoke_annotation, location, hazards)
+        briefing_future = executor.submit(
+            subagents.invoke_briefing,
+            config,
+            location,
+            hazards,
+            planning_text,
+            fixture_pack=fixture_pack,
+        )
 
-    hazards, step = extract_hazard_notes(planning_text, features, fixture_pack=fixture_pack)
-    trace.append(step)
+        annotation_result = annotations_future.result()
+        briefing_result = briefing_future.result()
 
-    annotations, step = create_annotations(location, hazards)
-    trace.append(step)
+    annotations = annotation_result["annotations"]
+    briefing = briefing_result["briefing"]
+    evidence = briefing_result["evidence"]
+    bedrock_status = briefing_result["bedrockStatus"]
+    bedrock_fallback_reason = briefing_result["bedrockFallbackReason"]
+    trace.extend(annotation_result["trace"])
+    trace.extend(briefing_result["trace"])
 
-    briefing, evidence, step = generate_site_brief(location, hazards, planning_text, fixture_pack=fixture_pack)
-    trace.append(step)
-
-    briefing, step, bedrock_status, bedrock_fallback_reason = apply_bedrock_briefing(
-        config,
-        location,
-        hazards,
-        briefing,
-        evidence,
-        planning_text,
-    )
-    trace.append(step)
-
-    safety, step = safety_gate(request, briefing)
-    trace.append(step)
+    review_result = subagents.invoke_review(request, briefing)
+    safety = review_result["safety"]
+    trace.extend(review_result["trace"])
 
     sources = source_register(
         include_planning_fixture=request_summary["includePlanningFixture"],
@@ -99,6 +128,7 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
     runtime["fixturePack"] = fixture_pack["name"] if fixture_pack else None
     runtime["fixturePackMode"] = "cached-public-fixture" if fixture_pack else "synthetic-default"
     runtime["liveApiCalls"] = False
+    runtime["subagentExecutionMode"] = subagents.execution_mode
 
     return {
         "runId": "demo1-local-run",

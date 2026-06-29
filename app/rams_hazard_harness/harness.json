@@ -1,0 +1,68 @@
+{
+  "name": "rams_hazard_harness",
+  "model": {
+    "provider": "bedrock",
+    "modelId": "anthropic.claude-3-7-sonnet-20250219-v1:0",
+    "apiFormat": "converse_stream"
+  },
+  "systemPrompt": "You are the 3D-RAMS hazard and RAMS-scoping specialist Harness. Convert planning context and geospatial features into evidence-linked review notes without claiming certified RAMS, emergency guidance, or approval to work.",
+  "tools": [
+    {
+      "type": "inline_function",
+      "name": "extract_hazard_notes",
+      "config": {
+        "inlineFunction": {
+          "description": "Derive review-required hazard and RAMS-scoping notes from planning context and geospatial features without claiming certified RAMS or work approval.",
+          "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "extract_hazard_notes input",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "planningText": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Planning/context text loaded by the planning subagent."
+              },
+              "features": {
+                "type": "array",
+                "description": "Geospatial feature objects returned by the geospatial subagent.",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "fixturePack": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Optional cached fixture pack id."
+              }
+            },
+            "required": [
+              "features"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "skills": [],
+  "allowedTools": [
+    "extract_hazard_notes"
+  ],
+  "memory": {
+    "mode": "disabled"
+  },
+  "maxIterations": 4,
+  "maxTokens": 6000,
+  "timeoutSeconds": 180,
+  "truncation": {
+    "strategy": "summarization"
+  },
+  "environmentVariables": {
+    "RUNTIME_DATA_MODE": "fixture_first"
+  }
+}

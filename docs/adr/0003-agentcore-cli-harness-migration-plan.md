@@ -416,12 +416,17 @@ The scaffold-first runtime migration has been implemented in the repository:
 - The frontend now calls the AgentCore invocation adapter through `/agentcore/invocations`.
 - The legacy `backend/` FastAPI compatibility layer has been removed after tests and scripts were migrated.
 - `app/asi_one_entry_agent/` now contains the imported ASI:ONE / AgentVerse entry runtime source.
-- `app/rams_supervisor_harness/` is the only retained Harness folder; the unused imported `app/MyHarness` scaffold was removed.
+- `app/rams_supervisor_harness/` is the supervisor Harness folder; the unused imported `app/MyHarness` scaffold was removed.
+- Specialist Harness subagents now exist under `app/rams_geospatial_harness/`, `app/rams_planning_harness/`, `app/rams_hazard_harness/`, `app/rams_annotation_harness/`, `app/rams_briefing_harness/`, and `app/rams_review_harness/`.
+- Harness subagents were added with the AgentCore CLI and registered in `agentcore/agentcore.json`.
+- Shared tool contracts now live under `app/rams_agent_tools/tool_schemas/` and are registered as inline function tool declarations on the relevant Harness configs.
+- `app/rams_supervisor_harness/subagents.json` records the supervisor fan-out plan and maps subagent ids to Harness names.
+- `app/rams_supervisor_runtime/supervisor_core/subagent_invoker.py` now provides the execution adapter: direct deterministic local execution by default, or `bedrock-agentcore.invoke_harness` when `RAMS_SUBAGENT_EXECUTION_MODE=agentcore_harness` and deployed Harness ARNs are configured.
 
 The remaining ADR3 work is no longer “move the old backend into AgentCore.” It is now:
 
-1. Replace the current deterministic supervisor function with the ADR2 supervisor/reviewer workflow shape.
-2. Decide which project-defined tools remain inline Python functions, which become AgentCore tools, and which should be exposed through AgentCore Gateway/MCP.
+1. Deploy the Harness resources, capture their ARNs, set the supervisor runtime Harness ARN environment variables, and run a real cloud smoke using `RAMS_SUBAGENT_EXECUTION_MODE=agentcore_harness`.
+2. Decide which project-defined tools remain inline functions, which become AgentCore Gateway/MCP tools, and which need custom execution adapters.
 3. Implement the AgentVerse entry agent that adapts ASI:ONE intake into the AgentCore supervisor invocation, because direct ASI:ONE-to-AgentCore exposure was not viable in local testing.
 4. Define the structured report JSON schema and review-agent pass/fail contract before claiming review-passed visualization.
 5. Run AgentCore validation, package, dry-run deploy, and then real cloud smoke after AWS account/IAM/budget settings are settled.

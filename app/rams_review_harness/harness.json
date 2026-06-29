@@ -1,0 +1,115 @@
+{
+  "name": "rams_review_harness",
+  "model": {
+    "provider": "bedrock",
+    "modelId": "anthropic.claude-3-7-sonnet-20250219-v1:0",
+    "apiFormat": "converse_stream"
+  },
+  "systemPrompt": "You are the independent 3D-RAMS review gate Harness. Check support, inference quality, fixture/fallback boundaries, and safety language before frontend visualization. Return pass or concrete rejection reasons.",
+  "tools": [
+    {
+      "type": "inline_function",
+      "name": "safety_gate",
+      "config": {
+        "inlineFunction": {
+          "description": "Review generated content and requests for unsupported certified RAMS, emergency guidance, or approval-to-work claims.",
+          "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "safety_gate input",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "request": {
+                "type": "object",
+                "description": "Original supervisor request."
+              },
+              "briefing": {
+                "type": "object",
+                "description": "Draft briefing or structured report content to review."
+              }
+            },
+            "required": [
+              "request",
+              "briefing"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "inline_function",
+      "name": "architecture_snapshot",
+      "config": {
+        "inlineFunction": {
+          "description": "Assemble the evidence, source, safety, and runtime trace snapshot used for frontend inspection and CloudWatch mapping.",
+          "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "architecture_snapshot input",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "trace": {
+                "type": "array",
+                "description": "Workflow trace entries.",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "request": {
+                "type": "object",
+                "description": "Normalized request summary."
+              },
+              "sources": {
+                "type": "array",
+                "description": "Source register entries.",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "evidence": {
+                "type": "array",
+                "description": "Evidence objects.",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "safety": {
+                "type": "object",
+                "description": "Safety/review decision object."
+              },
+              "runtime": {
+                "type": "object",
+                "description": "Public runtime metadata."
+              }
+            },
+            "required": [
+              "trace",
+              "request",
+              "sources",
+              "evidence",
+              "safety",
+              "runtime"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "skills": [],
+  "allowedTools": [
+    "safety_gate",
+    "architecture_snapshot"
+  ],
+  "memory": {
+    "mode": "disabled"
+  },
+  "maxIterations": 5,
+  "maxTokens": 8000,
+  "timeoutSeconds": 240,
+  "truncation": {
+    "strategy": "summarization"
+  },
+  "environmentVariables": {
+    "RUNTIME_DATA_MODE": "fixture_first"
+  }
+}

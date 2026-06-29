@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "load_geospatial_features input",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "location": {
+      "type": "object",
+      "description": "Resolved site location object with label, latitude, longitude, and optional authority."
+    },
+    "simulateFailure": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, exercise the deterministic geospatial fallback path."
+    },
+    "fixturePack": {
+      "type": ["string", "null"],
+      "description": "Optional cached fixture pack id."
+    }
+  },
+  "required": ["location"]
+}

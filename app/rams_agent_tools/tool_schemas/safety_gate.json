@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "safety_gate input",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "request": {
+      "type": "object",
+      "description": "Original supervisor request."
+    },
+    "briefing": {
+      "type": "object",
+      "description": "Draft briefing or structured report content to review."
+    }
+  },
+  "required": ["request", "briefing"]
+}

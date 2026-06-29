@@ -1,0 +1,135 @@
+{
+  "name": "rams_geospatial_harness",
+  "model": {
+    "provider": "bedrock",
+    "modelId": "anthropic.claude-3-7-sonnet-20250219-v1:0",
+    "apiFormat": "converse_stream"
+  },
+  "systemPrompt": "You are the 3D-RAMS geospatial specialist Harness. Resolve confirmed site inputs, load fixture-first geospatial features, and build frontend scene configuration with trace/source metadata. Do not infer hazards or write report prose.",
+  "tools": [
+    {
+      "type": "inline_function",
+      "name": "resolve_location",
+      "config": {
+        "inlineFunction": {
+          "description": "Resolve a confirmed 3D-RAMS site request into a normalized location object with evidence trace metadata.",
+          "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "resolve_location input",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "request": {
+                "type": "object",
+                "description": "Confirmed supervisor request containing optional siteName, latitude, longitude, and upstream context."
+              },
+              "fixturePack": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Optional cached fixture pack id, for example public-lambeth-thames."
+              }
+            },
+            "required": [
+              "request"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "inline_function",
+      "name": "load_geospatial_features",
+      "config": {
+        "inlineFunction": {
+          "description": "Load fixture-first geospatial context features for a resolved site location, including deterministic fallback behavior.",
+          "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "load_geospatial_features input",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "location": {
+                "type": "object",
+                "description": "Resolved site location object with label, latitude, longitude, and optional authority."
+              },
+              "simulateFailure": {
+                "type": "boolean",
+                "default": false,
+                "description": "When true, exercise the deterministic geospatial fallback path."
+              },
+              "fixturePack": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Optional cached fixture pack id."
+              }
+            },
+            "required": [
+              "location"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "inline_function",
+      "name": "build_scene_config",
+      "config": {
+        "inlineFunction": {
+          "description": "Build the frontend 3D scene configuration from resolved location and geospatial feature evidence.",
+          "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "build_scene_config input",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "location": {
+                "type": "object",
+                "description": "Resolved site location object."
+              },
+              "features": {
+                "type": "array",
+                "description": "Geospatial feature objects returned by load_geospatial_features.",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "fixturePack": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Optional cached fixture pack id."
+              }
+            },
+            "required": [
+              "location",
+              "features"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "skills": [],
+  "allowedTools": [
+    "resolve_location",
+    "load_geospatial_features",
+    "build_scene_config"
+  ],
+  "memory": {
+    "mode": "disabled"
+  },
+  "maxIterations": 4,
+  "maxTokens": 6000,
+  "timeoutSeconds": 180,
+  "truncation": {
+    "strategy": "summarization"
+  },
+  "environmentVariables": {
+    "RUNTIME_DATA_MODE": "fixture_first"
+  }
+}

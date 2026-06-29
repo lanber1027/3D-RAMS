@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "extract_hazard_notes input",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "planningText": {
+      "type": ["string", "null"],
+      "description": "Planning/context text loaded by the planning subagent."
+    },
+    "features": {
+      "type": "array",
+      "description": "Geospatial feature objects returned by the geospatial subagent.",
+      "items": {
+        "type": "object"
+      }
+    },
+    "fixturePack": {
+      "type": ["string", "null"],
+      "description": "Optional cached fixture pack id."
+    }
+  },
+  "required": ["features"]
+}

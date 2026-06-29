@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "apply_bedrock_briefing input",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "location": {
+      "type": "object",
+      "description": "Resolved site location object."
+    },
+    "hazards": {
+      "type": "array",
+      "description": "Hazard notes used for optional Bedrock drafting.",
+      "items": {
+        "type": "object"
+      }
+    },
+    "briefing": {
+      "type": "object",
+      "description": "Deterministic briefing object to retain or revise."
+    },
+    "evidence": {
+      "type": "array",
+      "description": "Evidence objects supporting the briefing.",
+      "items": {
+        "type": "object"
+      }
+    },
+    "planningText": {
+      "type": ["string", "null"],
+      "description": "Planning/context text used for grounding."
+    },
+    "useBedrock": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether Bedrock drafting is requested. Demo defaults keep this false."
+    }
+  },
+  "required": ["location", "hazards", "briefing", "evidence"]
+}

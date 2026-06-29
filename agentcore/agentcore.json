@@ -74,6 +74,30 @@
     {
       "name": "rams_supervisor_harness",
       "path": "app/rams_supervisor_harness"
+    },
+    {
+      "name": "rams_geospatial_harness",
+      "path": "app/rams_geospatial_harness"
+    },
+    {
+      "name": "rams_planning_harness",
+      "path": "app/rams_planning_harness"
+    },
+    {
+      "name": "rams_hazard_harness",
+      "path": "app/rams_hazard_harness"
+    },
+    {
+      "name": "rams_annotation_harness",
+      "path": "app/rams_annotation_harness"
+    },
+    {
+      "name": "rams_briefing_harness",
+      "path": "app/rams_briefing_harness"
+    },
+    {
+      "name": "rams_review_harness",
+      "path": "app/rams_review_harness"
     }
   ],
   "datasets": [],

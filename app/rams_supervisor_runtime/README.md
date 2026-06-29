@@ -27,6 +27,11 @@ Runtime-required fixture data is packaged under `fixtures/` so local mock and ca
 | `LOCAL_DEV` | No | Set to `1` to use `.env.local` instead of AgentCore Identity. |
 | `ENABLE_BEDROCK` | No | Set to `true` only when AWS credentials and model access are ready. Defaults to deterministic fallback. |
 | `RUNTIME_DATA_MODE` | No | Use `fixture_first` for Demo1 and no-AWS validation. |
+| `RAMS_SUBAGENT_EXECUTION_MODE` | No | Defaults to `direct`, which runs the shared Python tool functions locally. Set to `agentcore_harness` only after Harness ARNs and IAM are configured. |
+| `RAMS_HARNESS_ARNS` | For `agentcore_harness` mode | JSON object mapping Harness names to deployed Harness ARNs. Individual variables such as `RAMS_GEOSPATIAL_HARNESS_ARN` can be used instead. |
+| `RAMS_HARNESS_QUALIFIER` | No | Harness endpoint qualifier. Defaults to `DEFAULT`. |
+
+The supervisor always dispatches through `supervisor_core.subagent_invoker`. In local demo mode this adapter uses deterministic direct execution. In `agentcore_harness` mode it calls `bedrock-agentcore.invoke_harness`, handles inline function tool-use events, executes the shared Python tool functions, and returns JSON results to the supervisor.
 
 # Developing locally
 
@@ -50,4 +55,4 @@ For the AgentVerse/ASI:ONE entry-agent payload shape, see `docs/agentverse-agent
 
 After providing credentials and passing the repo verification stack, `agentcore deploy` can deploy the project into Amazon Bedrock AgentCore.
 
-Use `agentcore invoke` to invoke your deployed agent.
+Use `agentcore invoke` to invoke your deployed runtime. To test deployed Harness subagent execution through the supervisor, set `RAMS_SUBAGENT_EXECUTION_MODE=agentcore_harness` and provide the deployed Harness ARNs through `RAMS_HARNESS_ARNS` or the individual `RAMS_*_HARNESS_ARN` variables.

@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "3d-rams.supervisor-subagents.v1",
+  "mode": "agentcore-harness-subagents",
+  "notes": [
+    "Each subagent is an AgentCore Harness resource registered in agentcore/agentcore.json.",
+    "Local Demo1 runtime may still use direct supervisor calls until deployed Harness invocation is wired.",
+    "Open-web/Tavily work is intentionally omitted until credential and source-boundary decisions are made."
+  ],
+  "subagents": [
+    {
+      "id": "geospatial_subagent",
+      "harness": "rams_geospatial_harness",
+      "phase": "initial_parallel_research",
+      "allowedTools": ["resolve_location", "load_geospatial_features", "build_scene_config"],
+      "dependsOn": [],
+      "outputs": ["location", "features", "scene", "trace"]
+    },
+    {
+      "id": "planning_subagent",
+      "harness": "rams_planning_harness",
+      "phase": "initial_parallel_research",
+      "allowedTools": ["load_planning_context"],
+      "dependsOn": [],
+      "outputs": ["planningText", "trace"]
+    },
+    {
+      "id": "hazard_subagent",
+      "harness": "rams_hazard_harness",
+      "phase": "evidence_synthesis",
+      "allowedTools": ["extract_hazard_notes"],
+      "dependsOn": ["geospatial_subagent", "planning_subagent"],
+      "outputs": ["hazards", "trace"]
+    },
+    {
+      "id": "annotation_subagent",
+      "harness": "rams_annotation_harness",
+      "phase": "parallel_report_preparation",
+      "allowedTools": ["create_annotations"],
+      "dependsOn": ["geospatial_subagent", "hazard_subagent"],
+      "outputs": ["annotations", "trace"]
+    },
+    {
+      "id": "briefing_subagent",
+      "harness": "rams_briefing_harness",
+      "phase": "parallel_report_preparation",
+      "allowedTools": ["generate_site_brief", "apply_bedrock_briefing"],
+      "dependsOn": ["geospatial_subagent", "planning_subagent", "hazard_subagent"],
+      "outputs": ["briefing", "evidence", "bedrockStatus", "trace"]
+    },
+    {
+      "id": "review_guardrail",
+      "harness": "rams_review_harness",
+      "phase": "independent_review_gate",
+      "allowedTools": ["safety_gate", "architecture_snapshot"],
+      "dependsOn": ["annotation_subagent", "briefing_subagent"],
+      "outputs": ["reviewDecision", "architecture", "trace"]
+    }
+  ],
+  "fanOutPlan": [
+    {
+      "step": "initial_parallel_research",
+      "parallel": ["geospatial_subagent", "planning_subagent"]
+    },
+    {
+      "step": "evidence_synthesis",
+      "parallel": ["hazard_subagent"]
+    },
+    {
+      "step": "parallel_report_preparation",
+      "parallel": ["annotation_subagent", "briefing_subagent"]
+    },
+    {
+      "step": "independent_review_gate",
+      "parallel": ["review_guardrail"]
+    }
+  ]
+}

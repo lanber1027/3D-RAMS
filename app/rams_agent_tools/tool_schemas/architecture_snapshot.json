@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "architecture_snapshot input",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "trace": {
+      "type": "array",
+      "description": "Workflow trace entries.",
+      "items": {
+        "type": "object"
+      }
+    },
+    "request": {
+      "type": "object",
+      "description": "Normalized request summary."
+    },
+    "sources": {
+      "type": "array",
+      "description": "Source register entries.",
+      "items": {
+        "type": "object"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "description": "Evidence objects.",
+      "items": {
+        "type": "object"
+      }
+    },
+    "safety": {
+      "type": "object",
+      "description": "Safety/review decision object."
+    },
+    "runtime": {
+      "type": "object",
+      "description": "Public runtime metadata."
+    }
+  },
+  "required": ["trace", "request", "sources", "evidence", "safety", "runtime"]
+}
