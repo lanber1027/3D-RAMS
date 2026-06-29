@@ -60,6 +60,14 @@ The UI defaults to the cached `public-lambeth-thames` pack. Use the `Data pack` 
 
 For the 90-second walkthrough, before/after proof, and recording checklist, use [docs/demo-proof.md](docs/demo-proof.md).
 
+For repeatable local proof of the backend workflow, run:
+
+```bash
+python scripts/evaluate-demo.py
+```
+
+The evaluation runner covers nine deterministic scenarios, including cached-public happy path, missing planning evidence, map fallback, Bedrock-disabled fallback, unsafe request blocking, low-confidence output, architecture payload shape, and unknown pack fallback. See [docs/evaluation.md](docs/evaluation.md).
+
 ## Bedrock Mode
 
 The app defaults to deterministic fallback unless the backend is started with Bedrock enabled.

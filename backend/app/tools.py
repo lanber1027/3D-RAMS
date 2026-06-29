@@ -482,6 +482,7 @@ def generate_site_brief(
             "This cached pack is public-safe demo evidence and is not live, exhaustive, or operational advice.",
             "The briefing is not certified RAMS, not emergency guidance, and not work approval.",
             "All hazards need competent human review and current source checks before site work.",
+            "Imagery-derived or inferred features are labelled low confidence.",
         ]
         if not planning_text:
             limitations.append("Planning/context notes were unavailable or disabled, so document-derived hazards may be missing.")

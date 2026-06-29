@@ -44,6 +44,8 @@ Conservative claim:
 
 ## Test Scenarios
 
+For repeatable backend proof, run `python scripts/evaluate-demo.py` from the repo root. The runner forces no-AWS deterministic mode and checks the scenarios below plus unknown fixture-pack fallback. See [evaluation.md](evaluation.md).
+
 | Scenario | How To Run | Proof Point |
 | --- | --- | --- |
 | Cached public pack | Leave `Data pack` as `Lambeth public cache`, click `Run`. | Shows realistic source register, evidence, confidence, and annotations. |
