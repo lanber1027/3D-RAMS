@@ -14,7 +14,7 @@ flowchart LR
     Agent --> Locate["Resolve location or cached fixture pack"]
     Agent --> Geo["Load synthetic, cached-public, or fallback features"]
     Agent --> Scene["Build 3D scene config"]
-    Agent --> Planning["Load synthetic planning fixture"]
+    Agent --> Planning["Load cached-public or synthetic planning context"]
     Agent --> Hazards["Extract candidate hazard notes"]
     Agent --> Annotations["Create 3D annotations"]
     Agent --> Brief["Generate deterministic briefing"]

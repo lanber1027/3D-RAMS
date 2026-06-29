@@ -5,10 +5,10 @@ Use this guide to test the Demo1 flow before judging or submission. The app is i
 3D-RAMS turns a coordinate into an inspectable 3D pre-visit briefing pack. The default UI uses the cached `public-lambeth-thames` fixture pack for a Lambeth / Thames public-data example anchored on 8 Albert Embankment. It does not call live Planning Data, OpenStreetMap, Environment Agency, Lambeth, TfL, Google, or OS services during the demo.
 
 1. coordinate input;
-2. location fixture lookup;
-3. mocked geospatial features;
+2. selected fixture-pack lookup;
+3. cached-public, synthetic, or fallback geospatial features;
 4. Cesium scene configuration;
-5. synthetic planning fixture;
+5. cached-public or synthetic planning/context notes;
 6. candidate hazard extraction;
 7. 3D annotations;
 8. RAMS-style briefing;
@@ -88,7 +88,7 @@ Expected result: the app shows a 3D scene, annotations, RAMS-style briefing, evi
 The runtime pill should show `disabled`, `real`, or `fallback` for briefing mode.
 The `Data pack` control should show `Lambeth public cache` by default.
 
-### Step 7: Run Six Test Scenarios
+### Step 7: Run Test Scenarios
 
 Use demo fixture data only. Do not enter real client sites, confidential project locations, private planning documents, secrets, or API keys.
 
@@ -103,6 +103,7 @@ Use demo fixture data only. Do not enter real client sites, confidential project
 | Safety refusal | Click `Safety test`. | Agent refuses certified RAMS or work-approval claims. |
 | Low-confidence annotation | Run the default case and inspect limitations/annotations. | At least one item is labelled low confidence. |
 | Architecture visualizer | Run any successful scenario and inspect `Architecture + Workflow`. | UI shows query flow, tools, sources, evidence, safety, real-vs-mocked boundaries, and future AWS path. |
+| Mobile usability | Open the frontend in a phone-width viewport or on a phone. | Run controls remain reachable, proof surfaces are readable, and no primary action is blocked. |
 
 ### Step 8: Submit Feedback
 
@@ -120,16 +121,16 @@ Do not upload real site data, private documents, client material, secrets, or AP
 | --- | --- |
 | `frontend` | The website you click on. |
 | `backend` | The local agent/API that receives the coordinate and returns briefing data. |
-| `fixtures` | Fake/synthetic demo data, not real client data. |
-| `fixtures/public-lambeth-thames` | Cached public-source fixture pack and attribution files for the Lambeth / Thames example. |
+| `fixtures` | Public-safe cached and synthetic demo data, not client data. |
+| `fixtures/public-lambeth-thames` | Cached public-source fixture pack and attribution files for the Lambeth / Thames example. Runtime makes no live public-data calls. |
 | `scripts/start-dev.sh` | One-command startup script for Codespaces. |
 | `docs/team-test-guide.md` | This testing checklist. |
 | `.github/ISSUE_TEMPLATE` | Feedback form for teammate testing. |
 | `.devcontainer` | Codespaces setup recipe. |
 
-The backend exposes a health check endpoint and an `/api/run` endpoint. The agent workflow is:
+The backend exposes a health check endpoint and an `/api/run` endpoint. The default agent workflow is:
 
-`coordinate input -> fixture lookup -> mocked geospatial features -> scene config -> synthetic planning fixture -> hazard extraction -> annotations -> briefing -> safety gate -> evidence/trace/architecture visualizer`
+`coordinate or data-pack input -> fixture-pack lookup -> cached-public/synthetic features -> scene config -> cached-public/synthetic planning context -> hazard extraction -> annotations -> briefing -> safety gate -> evidence/trace/architecture visualizer`
 
 ## Local Fallback Setup
 

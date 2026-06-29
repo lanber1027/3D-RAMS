@@ -58,6 +58,8 @@ No AWS, Google Maps, Cesium ion token, or real site data is required.
 
 The UI defaults to the cached `public-lambeth-thames` pack. Use the `Data pack` control to switch to the older synthetic fixture path.
 
+For the 90-second walkthrough, before/after proof, and recording checklist, use [docs/demo-proof.md](docs/demo-proof.md).
+
 ## Bedrock Mode
 
 The app defaults to deterministic fallback unless the backend is started with Bedrock enabled.
