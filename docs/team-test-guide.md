@@ -1,6 +1,6 @@
 # Team Test Guide
 
-Use this guide to test the Demo1 flow before judging or submission. The app is intentionally local-first: it should run with public fixtures only, without AWS credentials, Google Maps keys, Cesium ion tokens, live planning portals, client data, or real site data.
+Use this guide to test the Demo1 flow before judging or submission. The app is intentionally local-first: it should run with public fixtures only, without Google Maps keys, Cesium ion tokens, live planning portals, client data, or real site data. Bedrock mode is available only when the backend has AWS credentials and `ENABLE_BEDROCK=true`; deterministic fallback remains available.
 
 3D-RAMS turns a coordinate into an inspectable 3D pre-visit briefing pack:
 
@@ -12,8 +12,9 @@ Use this guide to test the Demo1 flow before judging or submission. The app is i
 6. candidate hazard extraction;
 7. 3D annotations;
 8. RAMS-style briefing;
-9. safety gate;
-10. evidence register, trace, and architecture visualizer.
+9. optional Bedrock briefing generation;
+10. safety gate;
+11. evidence register, trace, and architecture visualizer.
 
 This is not certified RAMS, emergency guidance, work approval, or a competent-person replacement. Treat all output as a demo briefing for human review.
 
@@ -84,6 +85,7 @@ Leave the default coordinate and options unchanged, then click:
 `Run`
 
 Expected result: the app shows a 3D scene, annotations, RAMS-style briefing, evidence register, agent trace, and Architecture + Workflow visualizer.
+The runtime pill should show `disabled`, `real`, or `fallback` for briefing mode.
 
 ### Step 7: Run Six Test Scenarios
 
@@ -94,6 +96,7 @@ Use demo fixture data only. Do not enter real client sites, confidential project
 | Happy path | Leave defaults and click `Run`. | Scene, annotations, briefing, evidence, trace, and visualizer appear. |
 | Missing planning fixture | Turn off `Planning fixture`, then click `Run`. | App still works and explains planning evidence limitations. |
 | Map fallback | Turn on `Map fallback`, then click `Run`. | Trace shows geospatial loading using fallback. |
+| Bedrock disabled/fallback | Leave `Bedrock` on, but run without AWS config, or ask War Room to simulate failure. | App still works; trace shows Bedrock as disabled or fallback and keeps deterministic briefing. |
 | Safety refusal | Click `Safety test`. | Agent refuses certified RAMS or work-approval claims. |
 | Low-confidence annotation | Run the default case and inspect limitations/annotations. | At least one item is labelled low confidence. |
 | Architecture visualizer | Run any successful scenario and inspect `Architecture + Workflow`. | UI shows query flow, tools, sources, evidence, safety, real-vs-mocked boundaries, and future AWS path. |
@@ -150,6 +153,29 @@ Open `http://localhost:5173`.
 
 PowerShell note: if `npm run dev` is blocked by script execution policy, use `npm.cmd run dev`.
 
+## Optional Bedrock Setup
+
+Only use this if you are testing the live AWS path. Do not paste secrets into chat or commit `.env`.
+
+Backend environment:
+
+```bash
+ENABLE_BEDROCK=true
+AWS_PROFILE=3d-rams-dev
+AWS_REGION=eu-west-2
+BEDROCK_MODEL_ID=anthropic.claude-3-7-sonnet-20250219-v1:0
+BEDROCK_MAX_TOKENS=1200
+BEDROCK_TEMPERATURE=0.2
+```
+
+Low-volume smoke test:
+
+```bash
+python scripts/bedrock-smoke.py
+```
+
+Keep usage low: one Bedrock call per agent run, short fixture prompts only, and no real client/site data.
+
 ## Health Check
 
 If the UI cannot run, confirm the backend health check:
@@ -170,6 +196,7 @@ Expected response:
 - The RAMS-style briefing and its limitations.
 - Evidence register entries and source labels.
 - Trace rows with tool names and statuses.
+- Briefing mode pill: deterministic disabled, Bedrock real, or fallback.
 - `Architecture + Workflow` for query flow, tools, sources, evidence, safety, real-vs-mocked boundaries, and future AWS path.
 - `docs/architecture.md` for written architecture diagrams and trace shape.
 

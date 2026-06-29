@@ -17,7 +17,8 @@ flowchart LR
     Agent --> Planning["Load synthetic planning fixture"]
     Agent --> Hazards["Extract candidate hazard notes"]
     Agent --> Annotations["Create 3D annotations"]
-    Agent --> Brief["Generate briefing"]
+    Agent --> Brief["Generate deterministic briefing"]
+    Agent --> BedrockBrief["Optional Bedrock briefing"]
     Agent --> Safety["Safety gate"]
     Safety --> Output["Scene, briefing, evidence, trace, visualizer"]
     Output --> UI
@@ -79,34 +80,32 @@ sequenceDiagram
     A->>A: extract_hazard_notes
     A->>A: create_annotations
     A->>A: generate_site_brief
+    A->>A: generate_bedrock_briefing if enabled
     A->>A: safety_gate
     A-->>API: JSON run object
     API-->>UI: scene, briefing, evidence, sources, trace, architecture
     UI-->>U: 3D briefing and workflow visualizer
 ```
 
-## Future Bedrock Tool-Calling Path
+## Bedrock Briefing Path
 
 ```mermaid
 sequenceDiagram
     participant A as Agent Runtime
     participant Adapter as Model Adapter
     participant Bedrock as Amazon Bedrock
-    participant Tools as Approved Tools
     participant Safety as Guardrails and Human Review
     participant Obs as CloudWatch
 
-    A->>Adapter: Create structured extraction or briefing task
-    Adapter->>Bedrock: Invoke model with tool schema
-    Bedrock->>Tools: Request allowed tool action
-    Tools-->>Bedrock: Return cited, structured result
+    A->>Adapter: Create structured briefing task
+    Adapter->>Bedrock: Invoke model with structured evidence prompt
     Bedrock-->>Adapter: Draft extraction or briefing
     Adapter->>Safety: Check unsafe claims and review requirement
     Safety-->>A: allow, block, or require approval
     A->>Obs: Emit trace, latency, status, and evidence ids
 ```
 
-Demo1 does not require Bedrock. The current deterministic tool chain is designed so the same trace and evidence shape can be reused when a Bedrock adapter is added.
+Demo1 can run without Bedrock, but it now has a live Bedrock briefing path when `ENABLE_BEDROCK=true`. The deterministic briefing remains the fallback, and the Bedrock step is limited to one model call per agent run.
 
 ## Evidence, Trace, And Observability Flow
 
@@ -151,11 +150,12 @@ The safety gate is deliberately visible. Judges and teammates should be able to 
 
 | Area | Current Source | Current Status | Visible In UI | Production AWS Mapping | Upgrade Risk |
 | --- | --- | --- | --- | --- | --- |
-| Agent loop | Python backend | Real deterministic code | Tool timeline and trace | Bedrock model/tool planning | Model variability and evaluation |
+| Agent loop | Python backend | Real deterministic code plus optional Bedrock briefing | Tool timeline and trace | Bedrock model/tool planning | Model variability and evaluation |
 | Request state | Browser form payload | Real | Run overview | DynamoDB run/session record | Data privacy and retention |
-| 3D viewer | React/Vite + CesiumJS | Real local scene | 3D scene | Static frontend plus API runtime | Performance on low-power devices |
+| 3D viewer | React/Vite + CesiumJS | Real token-free local scene plus overlay | 3D scene | Static frontend plus API runtime | Performance on low-power devices |
 | Geospatial features | `fixtures/geospatial_features.json` | Mocked or fallback | Sources and annotations | S3 source object plus live geospatial APIs | Licensing, freshness, key management |
 | Planning context | `fixtures/planning_report.txt` | Synthetic fixture or unavailable | Sources, evidence, briefing limits | S3 documents plus Bedrock extraction | Scraping reliability and citations |
+| Bedrock briefing | Amazon Bedrock when configured | Optional live AWS call with deterministic fallback | Runtime mode, trace, and briefing | Evaluated Bedrock adapter with CloudWatch traces | Cost, model access, latency, and fallback quality |
 | Safety gate | Python rules | Real Demo1 policy | Safety pill and visualizer | Guardrails plus human review queue | Overclaiming or hidden unsafe edge cases |
 | Evidence register | API response | Real response object | Evidence cards | S3 evidence pack | Source traceability |
 | Observability | JSON trace | Real response object | Trace and visualizer | CloudWatch logs, metrics, traces | Noise and cost control |
@@ -179,7 +179,7 @@ flowchart TB
     UI["React UI"] --> Edge["CloudFront or static hosting"]
     UI --> APIGW["API Gateway or App Runner endpoint"]
     APIGW --> Runtime["Agent runtime service"]
-    Runtime --> Bedrock["Amazon Bedrock model/tool planning"]
+    Runtime --> Bedrock["Amazon Bedrock briefing generation"]
     Runtime --> Guardrails["Bedrock Guardrails"]
     Runtime --> DDB["DynamoDB run state and approvals"]
     Runtime --> S3["S3 evidence packs and source documents"]
@@ -199,7 +199,8 @@ Core fields:
 
 - `request`: submitted site name, coordinate, goal, toggles, and additional request;
 - `sources`: real, mocked, fallback, unavailable, and future source register;
-- `trace`: ordered tool calls with source ids, evidence ids, fallback reason, and AWS mapping;
+- `runtime`: deterministic, Bedrock, disabled, or fallback briefing mode;
+- `trace`: ordered tool calls with source ids, evidence ids, fallback reason, model metadata, and AWS mapping;
 - `evidence`: evidence register shown to the user;
 - `safety`: allow/block decision, triggered rules, review requirement, and decision id;
 - `architecture`: UI-ready run overview, current trace, source map, safety gate, real-vs-mocked register, and future AWS path.

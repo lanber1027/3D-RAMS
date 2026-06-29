@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from .bedrock_adapter import BedrockAdapterError, generate_bedrock_briefing
+from .config import RuntimeConfig
 from .fixtures import load_json, load_text
 
 
@@ -14,6 +16,7 @@ AWS_TRACE_MAPPING = {
     "extract_hazard_notes": "Bedrock/CloudWatch span: tool.extract_hazard_notes",
     "create_annotations": "CloudWatch span: tool.create_annotations",
     "generate_site_brief": "Bedrock/CloudWatch span: tool.generate_site_brief",
+    "generate_bedrock_briefing": "Bedrock/CloudWatch span: tool.generate_bedrock_briefing",
     "safety_gate": "Guardrails/CloudWatch span: tool.safety_gate",
 }
 
@@ -27,6 +30,7 @@ def trace_step(
     source_ids: list[str] | None = None,
     evidence_ids: list[str] | None = None,
     fallback_reason: str | None = None,
+    duration_ms: int = 0,
 ) -> dict[str, Any]:
     timestamp = datetime.now(timezone.utc).isoformat()
     return {
@@ -38,7 +42,7 @@ def trace_step(
         "timestamp": timestamp,
         "startedAt": timestamp,
         "endedAt": timestamp,
-        "durationMs": 0,
+        "durationMs": duration_ms,
         "sourceIds": source_ids or [],
         "evidenceIds": evidence_ids or [],
         "fallbackReason": fallback_reason,
@@ -58,11 +62,17 @@ def normalize_request(request: dict[str, Any]) -> dict[str, Any]:
         "goal": request.get("goal") or "Pre-visit RAMS scoping pack",
         "includePlanningFixture": bool(request.get("includePlanningFixture", True)),
         "simulateMapFailure": bool(request.get("simulateMapFailure")),
+        "useBedrock": bool(request.get("useBedrock", True)),
         "additionalRequest": request.get("additionalRequest") or "",
     }
 
 
-def source_register(include_planning_fixture: bool, simulate_map_failure: bool) -> list[dict[str, Any]]:
+def source_register(
+    include_planning_fixture: bool,
+    simulate_map_failure: bool,
+    bedrock_status: str,
+    config: RuntimeConfig,
+) -> list[dict[str, Any]]:
     sources = [
         {
             "id": "user-request",
@@ -101,13 +111,17 @@ def source_register(include_planning_fixture: bool, simulate_map_failure: bool) 
             "awsMapping": "CloudFront/static frontend plus App Runner/API Gateway backend",
         },
         {
-            "id": "bedrock-future",
-            "label": "Future Bedrock extraction and briefing adapter",
+            "id": "bedrock-briefing",
+            "label": "Amazon Bedrock briefing adapter",
             "kind": "llm_adapter",
-            "status": "future",
-            "origin": "Not live in Demo1",
-            "trustBoundary": "Future AWS account boundary",
-            "awsMapping": "Amazon Bedrock model/tool planning",
+            "status": bedrock_status,
+            "origin": (
+                f"{config.bedrock_model_id} in {config.aws_region}"
+                if config.bedrock_enabled
+                else "Disabled unless ENABLE_BEDROCK=true and request uses Bedrock"
+            ),
+            "trustBoundary": "AWS account boundary when enabled",
+            "awsMapping": "Amazon Bedrock InvokeModel for one briefing step per run",
         },
     ]
     sources.append(
@@ -350,10 +364,141 @@ def generate_site_brief(
     return briefing, evidence, trace_step(
         "generate_site_brief",
         "ok",
-        "Generated a RAMS-style briefing with explicit limitations and evidence references.",
-        {"evidence_count": len(evidence), "priority_checks": len(briefing["priority_checks"])},
+        "Generated deterministic fallback briefing with explicit limitations and evidence references.",
+        {
+            "mode": "deterministic",
+            "evidence_count": len(evidence),
+            "priority_checks": len(briefing["priority_checks"]),
+        },
         evidence_ids=[item["id"] for item in evidence],
     )
+
+
+def apply_bedrock_briefing(
+    config: RuntimeConfig,
+    location: dict[str, Any],
+    hazards: list[dict[str, Any]],
+    briefing: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    planning_text: str | None,
+) -> tuple[dict[str, Any], dict[str, Any], str, str | None]:
+    if not config.bedrock_requested:
+        return briefing, trace_step(
+            "generate_bedrock_briefing",
+            "disabled",
+            "Bedrock briefing was not requested for this run; deterministic briefing remains active.",
+            {"mode": "deterministic", "requested": False},
+            source_ids=["bedrock-briefing"],
+            evidence_ids=[item["id"] for item in evidence],
+        ), "disabled", "Bedrock was not requested."
+
+    if not config.bedrock_enabled:
+        return briefing, trace_step(
+            "generate_bedrock_briefing",
+            "disabled",
+            "Bedrock briefing is disabled by environment; deterministic briefing remains active.",
+            {
+                "mode": "deterministic",
+                "requested": True,
+                "enabled": False,
+                "modelId": None,
+                "maxTokens": None,
+                "temperature": None,
+            },
+            source_ids=["bedrock-briefing"],
+            evidence_ids=[item["id"] for item in evidence],
+            fallback_reason="Set ENABLE_BEDROCK=true with AWS credentials to use the live Bedrock path.",
+        ), "disabled", "ENABLE_BEDROCK is not true."
+
+    try:
+        bedrock_briefing, metadata = generate_bedrock_briefing(
+            config=config,
+            location=location,
+            hazards=hazards,
+            deterministic_briefing=briefing,
+            evidence=evidence,
+            planning_available=planning_text is not None,
+        )
+    except (BedrockAdapterError, Exception) as exc:
+        fallback_reason = f"Bedrock briefing failed; deterministic briefing used. Reason: {exc}"
+        return briefing, trace_step(
+            "generate_bedrock_briefing",
+            "fallback",
+            "Bedrock briefing failed; deterministic briefing remains active.",
+            {
+                "mode": "deterministic-fallback",
+                "modelId": config.bedrock_model_id,
+                "awsRegion": config.aws_region,
+                "maxTokens": config.bedrock_max_tokens,
+                "temperature": config.bedrock_temperature,
+                "errorType": exc.__class__.__name__,
+            },
+            source_ids=["bedrock-briefing"],
+            evidence_ids=[item["id"] for item in evidence],
+            fallback_reason=fallback_reason,
+        ), "fallback", fallback_reason
+
+    bedrock_status = "mocked" if metadata.get("mode") == "bedrock-mock" else "real"
+    return bedrock_briefing, trace_step(
+        "generate_bedrock_briefing",
+        "ok",
+        "Generated one Bedrock-backed briefing from structured hazards and evidence.",
+        metadata,
+        source_ids=["bedrock-briefing"],
+        evidence_ids=[item["id"] for item in evidence],
+        duration_ms=int(metadata.get("latencyMs", 0)),
+    ), bedrock_status, None
+
+
+def _flatten_text(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        parts: list[str] = []
+        for item in value.values():
+            parts.extend(_flatten_text(item))
+        return parts
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            parts.extend(_flatten_text(item))
+        return parts
+    return []
+
+
+def _find_unsupported_generated_claims(text: str, blocked_terms: list[str]) -> list[str]:
+    normalized = " ".join(text.lower().split())
+    matches: list[str] = []
+    for term in blocked_terms:
+        start = normalized.find(term)
+        while start != -1:
+            if not _is_negated_safety_boundary(normalized, start, term):
+                matches.append(term)
+                break
+            start = normalized.find(term, start + len(term))
+    return matches
+
+
+def _is_negated_safety_boundary(text: str, claim_start: int, term: str) -> bool:
+    prefix = text[max(0, claim_start - 90) : claim_start]
+    claim = text[claim_start : claim_start + len(term)]
+    boundary_text = f"{prefix}{claim}"
+    safe_boundary_patterns = [
+        f"cannot {term}",
+        f"can't {term}",
+        f"do not {term}",
+        f"does not {term}",
+        f"must not {term}",
+        f"must not be treated as {term}",
+        f"not {term}",
+        f"not a {term}",
+        f"not an {term}",
+        f"not operational {term}",
+        f"without {term}",
+        "not a certified rams or work approval",
+        "not certified rams, emergency guidance, or work approval",
+    ]
+    return any(pattern in boundary_text for pattern in safe_boundary_patterns)
 
 
 def safety_gate(request: dict[str, Any], briefing: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -365,11 +510,17 @@ def safety_gate(request: dict[str, Any], briefing: dict[str, Any]) -> tuple[dict
         "certified rams",
         "certify rams",
         "emergency route",
+        "emergency guidance",
         "guarantee safe",
         "approve work",
+        "approved for work",
+        "work approval",
         "replace competent",
     ]
-    blocked = any(term in user_text for term in blocked_terms)
+    request_rules = [term for term in blocked_terms if term in user_text]
+    generated_text = " ".join(_flatten_text(briefing))
+    generated_rules = _find_unsupported_generated_claims(generated_text, blocked_terms)
+    blocked = bool(request_rules or generated_rules)
     decision = {
         "allowed": not blocked,
         "level": "blocked" if blocked else "review_required",
@@ -378,7 +529,11 @@ def safety_gate(request: dict[str, Any], briefing: dict[str, Any]) -> tuple[dict
             if blocked
             else "Allowed as a non-certified pre-visit briefing that requires human review."
         ),
-        "triggeredRules": [term for term in blocked_terms if term in user_text],
+        "triggeredRules": sorted(set(request_rules + generated_rules)),
+        "triggeredSources": {
+            "request": request_rules,
+            "generatedBriefing": generated_rules,
+        },
         "requiresHumanReview": True,
         "decisionId": "safety-demo1-blocked" if blocked else "safety-demo1-review-required",
     }
@@ -395,6 +550,7 @@ def safety_gate(request: dict[str, Any], briefing: dict[str, Any]) -> tuple[dict
             "allowed": decision["allowed"],
             "level": decision["level"],
             "triggeredRules": decision["triggeredRules"],
+            "triggeredSources": decision["triggeredSources"],
         },
         evidence_ids=["safety-policy"],
     )
@@ -406,6 +562,7 @@ def architecture_snapshot(
     sources: list[dict[str, Any]],
     evidence: list[dict[str, Any]],
     safety: dict[str, Any],
+    runtime: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "runOverview": {
@@ -414,6 +571,7 @@ def architecture_snapshot(
             "coordinate": f"{request_summary['latitude']}, {request_summary['longitude']}",
             "planningFixture": "enabled" if request_summary["includePlanningFixture"] else "disabled",
             "mapMode": "fallback" if request_summary["simulateMapFailure"] else "fixture",
+            "briefingMode": runtime["briefingMode"],
             "safetyLevel": safety["level"],
         },
         "nodes": [
@@ -440,6 +598,7 @@ def architecture_snapshot(
                 "sourceIds": step["sourceIds"],
                 "evidenceIds": step["evidenceIds"],
                 "fallbackReason": step["fallbackReason"],
+                "output": step["output"],
             }
             for step in trace
         ],
@@ -463,6 +622,7 @@ def architecture_snapshot(
         },
         "awsPath": [
             {"local": "Deterministic Python agent loop", "future": "Bedrock model/tool planning"},
+            {"local": "One Bedrock briefing step", "future": "Evaluated model-assisted extraction and generation"},
             {"local": "JSON trace in API response", "future": "CloudWatch logs, metrics, traces"},
             {"local": "Evidence list in response", "future": "S3 evidence pack"},
             {"local": "Per-request in-memory run", "future": "DynamoDB run/session record"},
@@ -470,9 +630,11 @@ def architecture_snapshot(
         ],
         "realVsMocked": [
             {"component": "Agent workflow", "status": "real deterministic code"},
+            {"component": "Bedrock briefing", "status": str(runtime["briefingMode"])},
             {"component": "3D viewer", "status": "real local Cesium scene"},
             {"component": "Planning documents", "status": "synthetic fixture"},
             {"component": "Live Google 3D / Earth", "status": "not used in Demo1"},
-            {"component": "AWS Bedrock / CloudWatch", "status": "designed, not required for Demo1"},
+            {"component": "CloudWatch / S3 / DynamoDB", "status": "production path, not live in MVP"},
         ],
+        "runtime": runtime,
     }

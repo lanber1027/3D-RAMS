@@ -2,7 +2,7 @@
 
 3D-RAMS is a hackathon Demo1 agent that turns a site coordinate into a 3D pre-visit briefing pack.
 
-The first slice is intentionally local-first: it runs without AWS credentials, Google Maps keys, Cesium ion keys, or live planning-portal scraping. The agent uses fixtures so the workflow can be inspected, tested, and extended safely before live integrations are added.
+The first slice is intentionally local-first: it can run without Google Maps keys, Cesium ion keys, live planning-portal scraping, or hosted infrastructure. The production-shaped path can also make one Amazon Bedrock call per run for briefing generation when AWS credentials are configured, while preserving deterministic fallback.
 
 ## Problem Statement
 
@@ -14,7 +14,7 @@ Read the full problem statement in [docs/problem-statement.md](docs/problem-stat
 
 ![3D-RAMS query-to-brief architecture flow](docs/assets/architecture/query-to-brief-flow.svg)
 
-This rendered diagram mirrors the source workflow in [docs/architecture.md](docs/architecture.md). The detailed architecture document remains the source of truth for the full Mermaid diagrams, trust boundaries, real-vs-mocked register, safety gate, and future AWS path.
+This rendered diagram is the README-scale view of the workflow in [docs/architecture.md](docs/architecture.md). The detailed architecture document remains the source of truth for the full Mermaid diagrams, trust boundaries, real-vs-mocked register, safety gate, and future AWS path.
 
 ## Demo Workflow
 
@@ -33,11 +33,12 @@ This rendered diagram mirrors the source workflow in [docs/architecture.md](docs
 
 | Component | Demo1 Status | Notes |
 | --- | --- | --- |
-| Agent workflow | Real deterministic Python code | Tool sequence, evidence, trace, safety gate, and response shape are implemented. |
-| 3D viewer | Real React/Vite + CesiumJS UI | Uses a local scene and annotations. No token is required for the initial run. |
+| Agent workflow | Real Python code | Tool sequence, evidence, trace, safety gate, deterministic fallback, and response shape are implemented. |
+| Bedrock briefing | Optional live AWS path | Uses one `InvokeModel` call per run when `ENABLE_BEDROCK=true`; deterministic briefing remains the fallback. |
+| 3D viewer | Real React/Vite + CesiumJS UI | Uses a token-free Cesium canvas plus local scene overlay and annotations. |
 | Geospatial features | Mocked fixture | `fixtures/geospatial_features.json` is public-safe synthetic data. |
 | Planning documents | Mocked fixture | `fixtures/planning_report.txt` is synthetic and not a real LPA document. |
-| AWS | Designed, not required | Bedrock, DynamoDB, S3, CloudWatch, Guardrails, and AgentCore are staged after the local loop works. |
+| AWS | Partially live when configured | Bedrock briefing can be live; DynamoDB, S3, CloudWatch, Guardrails, and AgentCore remain production-path stages. |
 | Google Maps / Earth / 3D Tiles | Not used | Kept out of Demo1 to avoid key, cost, licensing, and freshness risk. |
 
 ## Quickstart
@@ -53,6 +54,29 @@ bash scripts/start-dev.sh
 Codespaces should forward the frontend on port `5173` and backend on port `8000`. Use [docs/team-test-guide.md](docs/team-test-guide.md) for the scenario checklist and feedback template.
 
 No AWS, Google Maps, Cesium ion token, or real site data is required.
+
+## Bedrock Mode
+
+The app defaults to deterministic fallback unless the backend is started with Bedrock enabled.
+
+Recommended local settings:
+
+```bash
+ENABLE_BEDROCK=true
+AWS_PROFILE=3d-rams-dev
+AWS_REGION=eu-west-2
+BEDROCK_MODEL_ID=anthropic.claude-3-7-sonnet-20250219-v1:0
+BEDROCK_MAX_TOKENS=1200
+BEDROCK_TEMPERATURE=0.2
+```
+
+Run a low-volume smoke test:
+
+```bash
+python scripts/bedrock-smoke.py
+```
+
+Do not commit `.env`, AWS credentials, SSO cache files, API keys, or real client/site data. The UI shows whether a run used Bedrock, deterministic mode, or fallback.
 
 ## Local Quickstart
 
@@ -97,6 +121,7 @@ curl -X POST http://localhost:8000/api/run ^
 | Happy path | Click `Run` | Scene, annotations, briefing, evidence, and trace are returned. |
 | Missing data | Disable `Planning fixture`, click `Run` | Briefing continues with a planning-evidence limitation. |
 | Tool failure | Enable `Map fallback`, click `Run` | Trace marks geospatial loading as `fallback`. |
+| Bedrock fallback | Enable Bedrock in UI while backend has no AWS config, or set `BEDROCK_SIMULATE_FAILURE=true` | Trace marks Bedrock step as `disabled` or `fallback`; deterministic briefing remains available. |
 | Unsafe request | Click `Safety test` | Safety gate blocks certified RAMS/work approval behavior. |
 | Low confidence | Normal run | Imagery-derived bridge indicator is labelled low confidence. |
 | Architecture visualizer | Normal run | UI shows tool sequence, boundaries, AWS path, and real-vs-mocked status. |
@@ -105,7 +130,7 @@ curl -X POST http://localhost:8000/api/run ^
 
 Demo1 trace and response objects are shaped to map naturally to an AWS implementation:
 
-- Amazon Bedrock for model-assisted extraction and briefing generation.
+- Amazon Bedrock for the live model-assisted briefing step.
 - DynamoDB for versioned project state, approvals, and rollback records.
 - S3 for evidence packs, exported briefings, screenshots, and source documents.
 - CloudWatch for trace, latency, cost, and failure visibility.

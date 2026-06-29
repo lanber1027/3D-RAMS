@@ -12,18 +12,30 @@ const DEFAULT_REQUEST = {
   goal: "Pre-visit RAMS scoping pack",
   includePlanningFixture: true,
   simulateMapFailure: false,
+  useBedrock: true,
   additionalRequest: "",
 };
 
 function SceneViewer({ run }) {
   const containerRef = useRef(null);
+  const overlayPoints = useMemo(
+    () =>
+      (run?.annotations || []).slice(0, 6).map((annotation, index) => ({
+        annotation,
+        left: `${18 + ((index * 13) % 58)}%`,
+        top: `${24 + ((index * 17) % 44)}%`,
+      })),
+    [run],
+  );
 
   useEffect(() => {
     if (!containerRef.current || !run) return undefined;
 
+    Cesium.Ion.defaultAccessToken = "";
     const viewer = new Cesium.Viewer(containerRef.current, {
       animation: false,
       timeline: false,
+      baseLayer: false,
       geocoder: false,
       homeButton: false,
       sceneModePicker: false,
@@ -39,6 +51,55 @@ function SceneViewer({ run }) {
     viewer.scene.fog.enabled = false;
 
     const center = run.scene.center;
+    const sitePolygon = [
+      center.longitude - 0.006,
+      center.latitude - 0.004,
+      center.longitude + 0.006,
+      center.latitude - 0.004,
+      center.longitude + 0.006,
+      center.latitude + 0.004,
+      center.longitude - 0.006,
+      center.latitude + 0.004,
+    ];
+    viewer.entities.add({
+      name: "Review area",
+      polygon: {
+        hierarchy: Cesium.Cartesian3.fromDegreesArray(sitePolygon),
+        material: Cesium.Color.fromCssColorString("#87b7a7").withAlpha(0.38),
+        outline: true,
+        outlineColor: Cesium.Color.fromCssColorString("#0b6f65"),
+      },
+    });
+    viewer.entities.add({
+      name: "Indicative access route",
+      polyline: {
+        positions: Cesium.Cartesian3.fromDegreesArray([
+          center.longitude - 0.007,
+          center.latitude - 0.003,
+          center.longitude - 0.002,
+          center.latitude,
+          center.longitude + 0.004,
+          center.latitude + 0.002,
+        ]),
+        width: 4,
+        material: Cesium.Color.fromCssColorString("#273549"),
+      },
+    });
+    viewer.entities.add({
+      name: "Indicative watercourse",
+      polyline: {
+        positions: Cesium.Cartesian3.fromDegreesArray([
+          center.longitude - 0.006,
+          center.latitude + 0.003,
+          center.longitude - 0.001,
+          center.latitude + 0.001,
+          center.longitude + 0.006,
+          center.latitude + 0.003,
+        ]),
+        width: 3,
+        material: Cesium.Color.fromCssColorString("#1d4ed8"),
+      },
+    });
     viewer.entities.add({
       name: run.location.label,
       position: Cesium.Cartesian3.fromDegrees(center.longitude, center.latitude, 30),
@@ -90,7 +151,29 @@ function SceneViewer({ run }) {
     };
   }, [run]);
 
-  return <div ref={containerRef} className="scene-viewer" aria-label="3D site scene" />;
+  return (
+    <div className="scene-shell" aria-label="3D site scene">
+      <div ref={containerRef} className="scene-viewer" />
+      <div className="scene-overlay" aria-hidden="true">
+        <div className="review-area" />
+        <div className="route-line" />
+        <div className="water-line" />
+        <div className="scene-label site-label">Site</div>
+        <div className="scene-label route-label">Access route</div>
+        <div className="scene-label water-label">Watercourse</div>
+        {overlayPoints.map(({ annotation, left, top }) => (
+          <div
+            className={`hazard-marker ${annotation.confidence}`}
+            key={annotation.id}
+            style={{ left, top }}
+            title={`${annotation.title}: ${annotation.confidence} confidence`}
+          >
+            <span>{annotation.title}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function WorkflowVisualizer({ architecture }) {
@@ -121,6 +204,11 @@ function WorkflowVisualizer({ architecture }) {
           <strong>{overview.safetyLevel}</strong>
           <small>human review required before use</small>
         </div>
+        <div>
+          <span>Briefing Mode</span>
+          <strong>{overview.briefingMode}</strong>
+          <small>{architecture.runtime?.modelId || "deterministic fallback available"}</small>
+        </div>
       </div>
 
       <h3 className="visualizer-label">Tool Timeline</h3>
@@ -138,6 +226,8 @@ function WorkflowVisualizer({ architecture }) {
             </small>
             <small>Evidence: {step.evidenceIds.join(", ") || "none"}</small>
             {step.fallbackReason && <small className="warning-note">{step.fallbackReason}</small>}
+            {step.output?.modelId && <small>Model: {step.output.modelId}</small>}
+            {step.output?.latencyMs !== undefined && <small>Latency: {step.output.latencyMs} ms</small>}
           </article>
         ))}
       </div>
@@ -203,6 +293,13 @@ function App() {
     return run.safety.allowed ? "allowed" : "blocked";
   }, [run]);
 
+  const runtimeTone = useMemo(() => {
+    if (!run) return "pending";
+    if (run.runtime.briefingMode === "real") return "allowed";
+    if (run.runtime.briefingMode === "fallback") return "warning";
+    return "pending";
+  }, [run]);
+
   async function runAgent(nextRequest = request) {
     setLoading(true);
     setError("");
@@ -236,9 +333,15 @@ function App() {
           <p className="eyebrow">3D-RAMS Demo1</p>
           <h1>Pre-Visit Field Briefing Agent</h1>
         </div>
-        <div className={`safety-pill ${safetyTone}`}>
-          <ShieldCheck size={16} />
-          {run ? run.safety.level : "not run"}
+        <div className="status-stack">
+          <div className={`safety-pill ${safetyTone}`}>
+            <ShieldCheck size={16} />
+            {run ? run.safety.level : "not run"}
+          </div>
+          <div className={`safety-pill ${runtimeTone}`}>
+            <GitBranch size={16} />
+            {run ? run.runtime.briefingMode : "not run"}
+          </div>
         </div>
       </header>
 
@@ -274,6 +377,14 @@ function App() {
             onChange={(event) => updateRequest("simulateMapFailure", event.target.checked)}
           />
           Map fallback
+        </label>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={request.useBedrock}
+            onChange={(event) => updateRequest("useBedrock", event.target.checked)}
+          />
+          Bedrock
         </label>
         <button onClick={() => runAgent()} disabled={loading}>
           <Play size={16} />

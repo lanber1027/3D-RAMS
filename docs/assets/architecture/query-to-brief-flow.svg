@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="500" viewBox="0 0 1320 500" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="560" viewBox="0 0 1320 560" role="img" aria-labelledby="title desc">
   <title id="title">3D-RAMS query-to-brief architecture flow</title>
-  <desc id="desc">User submits a coordinate and options to a React UI, FastAPI endpoint, deterministic agent loop, tool sequence, safety gate, and inspectable output.</desc>
+  <desc id="desc">User submits a coordinate and options to a React UI and FastAPI endpoint. A deterministic agent loop runs fixture-backed tools, can optionally call Amazon Bedrock once for briefing text, passes through a safety gate, returns an inspectable review pack, and can later emit observability to AWS with human review in the loop.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#1f2937" />
@@ -14,86 +14,100 @@
       .subtitle { fill: #475569; font: 400 15px Arial, sans-serif; }
       .node { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; filter: url(#shadow); }
       .node-accent { fill: #e7f5ef; stroke: #0f766e; }
+      .node-ai { fill: #eff6ff; stroke: #2563eb; }
       .node-safety { fill: #fff7ed; stroke: #d97706; }
       .node-output { fill: #eef2ff; stroke: #4f46e5; }
+      .node-future { fill: #f8fafc; stroke: #94a3b8; stroke-dasharray: 7 5; }
       .label { fill: #111827; font: 700 15px Arial, sans-serif; }
       .small { fill: #475569; font: 400 12px Arial, sans-serif; }
       .step { fill: #0f766e; font: 700 12px Arial, sans-serif; }
       .arrow { stroke: #1f2937; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .arrow-future { stroke: #64748b; stroke-width: 2; fill: none; stroke-dasharray: 7 5; marker-end: url(#arrow); }
       .lane { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; }
       .lane-title { fill: #64748b; font: 700 12px Arial, sans-serif; letter-spacing: 0.08em; }
       .note { fill: #334155; font: 400 12px Arial, sans-serif; }
     </style>
   </defs>
 
-  <rect class="bg" width="1320" height="500" />
+  <rect class="bg" width="1320" height="560" />
   <text class="title" x="48" y="54">3D-RAMS Architecture At A Glance</text>
-  <text class="subtitle" x="48" y="80">Coordinate input to inspectable 3D pre-visit briefing pack, with evidence, trace, and safety boundary.</text>
+  <text class="subtitle" x="48" y="80">Coordinate input to inspectable 3D pre-visit briefing pack, with deterministic evidence flow, optional Bedrock drafting, safety gate, and future AWS observability.</text>
 
-  <rect class="lane" x="40" y="112" width="336" height="300" rx="18" />
-  <rect class="lane" x="400" y="112" width="184" height="300" rx="18" />
-  <rect class="lane" x="608" y="112" width="416" height="300" rx="18" />
-  <rect class="lane" x="1048" y="112" width="232" height="300" rx="18" />
+  <rect class="lane" x="40" y="112" width="308" height="324" rx="18" />
+  <rect class="lane" x="372" y="112" width="188" height="324" rx="18" />
+  <rect class="lane" x="584" y="112" width="424" height="324" rx="18" />
+  <rect class="lane" x="1032" y="112" width="248" height="324" rx="18" />
   <text class="lane-title" x="64" y="140">BROWSER / FRONTEND</text>
-  <text class="lane-title" x="424" y="140">API</text>
-  <text class="lane-title" x="632" y="140">AGENT TOOLS</text>
-  <text class="lane-title" x="1072" y="140">OUTPUT</text>
+  <text class="lane-title" x="396" y="140">API</text>
+  <text class="lane-title" x="608" y="140">AGENT + SAFETY</text>
+  <text class="lane-title" x="1056" y="140">REVIEW OUTPUT</text>
 
   <rect class="node node-accent" x="64" y="178" width="132" height="82" rx="14" />
   <text class="step" x="84" y="205">01</text>
   <text class="label" x="84" y="227">User request</text>
   <text class="small" x="84" y="247">Coordinate + options</text>
 
-  <rect class="node" x="220" y="178" width="132" height="82" rx="14" />
-  <text class="step" x="240" y="205">02</text>
-  <text class="label" x="240" y="227">React UI</text>
-  <text class="small" x="240" y="247">POST /api/run</text>
+  <rect class="node" x="208" y="178" width="116" height="82" rx="14" />
+  <text class="step" x="228" y="205">02</text>
+  <text class="label" x="228" y="227">React UI</text>
+  <text class="small" x="228" y="247">POST /api/run</text>
 
-  <rect class="node" x="426" y="178" width="132" height="82" rx="14" />
-  <text class="step" x="446" y="205">03</text>
-  <text class="label" x="446" y="227">FastAPI</text>
-  <text class="small" x="446" y="247">Run endpoint</text>
+  <rect class="node" x="400" y="178" width="132" height="82" rx="14" />
+  <text class="step" x="420" y="205">03</text>
+  <text class="label" x="420" y="227">FastAPI</text>
+  <text class="small" x="420" y="247">POST /api/run</text>
 
-  <rect class="node node-accent" x="634" y="178" width="154" height="82" rx="14" />
-  <text class="step" x="656" y="205">04</text>
-  <text class="label" x="656" y="227">Agent loop</text>
-  <text class="small" x="656" y="247">Deterministic Demo1</text>
+  <rect class="node node-accent" x="612" y="178" width="154" height="82" rx="14" />
+  <text class="step" x="634" y="205">04</text>
+  <text class="label" x="634" y="227">Agent loop</text>
+  <text class="small" x="634" y="247">Deterministic Demo1</text>
 
-  <rect class="node" x="822" y="132" width="166" height="66" rx="14" />
-  <text class="label" x="844" y="159">Resolve + load</text>
-  <text class="small" x="844" y="179">Location, geo, planning</text>
+  <rect class="node" x="800" y="132" width="184" height="66" rx="14" />
+  <text class="label" x="822" y="159">Resolve + load</text>
+  <text class="small" x="822" y="179">Location, geo, planning fixture</text>
 
-  <rect class="node" x="822" y="216" width="166" height="66" rx="14" />
-  <text class="label" x="844" y="243">Extract + annotate</text>
-  <text class="small" x="844" y="263">Hazards and 3D pins</text>
+  <rect class="node" x="800" y="216" width="184" height="66" rx="14" />
+  <text class="label" x="822" y="243">Extract + annotate</text>
+  <text class="small" x="822" y="263">Hazards, evidence, 3D pins</text>
 
-  <rect class="node" x="822" y="300" width="166" height="66" rx="14" />
-  <text class="label" x="844" y="327">Brief + trace</text>
-  <text class="small" x="844" y="347">Evidence and workflow</text>
+  <rect class="node" x="800" y="300" width="184" height="66" rx="14" />
+  <text class="label" x="822" y="327">Deterministic brief</text>
+  <text class="small" x="822" y="347">Trace + fallback output</text>
 
-  <rect class="node node-safety" x="634" y="304" width="154" height="82" rx="14" />
-  <text class="step" x="656" y="331">05</text>
-  <text class="label" x="656" y="353">Safety gate</text>
-  <text class="small" x="656" y="373">Blocks unsafe claims</text>
+  <rect class="node node-ai" x="612" y="288" width="154" height="66" rx="14" />
+  <text class="label" x="634" y="315">Optional Bedrock</text>
+  <text class="small" x="634" y="335">One briefing call per run</text>
 
-  <rect class="node node-output" x="1084" y="178" width="162" height="208" rx="16" />
-  <text class="step" x="1106" y="210">06</text>
-  <text class="label" x="1106" y="233">Review pack</text>
-  <text class="small" x="1106" y="258">3D scene</text>
-  <text class="small" x="1106" y="280">Briefing</text>
-  <text class="small" x="1106" y="302">Evidence</text>
-  <text class="small" x="1106" y="324">Trace</text>
-  <text class="small" x="1106" y="346">Visualizer</text>
+  <rect class="node node-safety" x="612" y="370" width="154" height="66" rx="14" />
+  <text class="step" x="634" y="397">05</text>
+  <text class="label" x="634" y="419">Safety gate</text>
+  <text class="small" x="634" y="439">Review-required boundary</text>
 
-  <path class="arrow" d="M196 219 H220" />
-  <path class="arrow" d="M352 219 H426" />
-  <path class="arrow" d="M558 219 H634" />
-  <path class="arrow" d="M788 219 H822" />
-  <path class="arrow" d="M905 198 V216" />
-  <path class="arrow" d="M905 282 V300" />
-  <path class="arrow" d="M822 333 H788" />
-  <path class="arrow" d="M711 260 V304" />
-  <path class="arrow" d="M788 345 H1084" />
+  <rect class="node node-output" x="1060" y="166" width="196" height="178" rx="16" />
+  <text class="step" x="1082" y="198">06</text>
+  <text class="label" x="1082" y="221">Review pack</text>
+  <text class="small" x="1082" y="246">3D scene + annotations</text>
+  <text class="small" x="1082" y="268">Briefing + limitations</text>
+  <text class="small" x="1082" y="290">Evidence + source register</text>
+  <text class="small" x="1082" y="312">Trace + visualizer</text>
 
-  <text class="note" x="48" y="454">Demo1 boundary: local deterministic workflow with public-safe fixtures. Not certified RAMS, work approval, emergency guidance, or production AWS.</text>
+  <rect class="node node-future" x="1060" y="360" width="196" height="76" rx="16" />
+  <text class="label" x="1082" y="388">Future AWS path</text>
+  <text class="small" x="1082" y="408">CloudWatch traces</text>
+  <text class="small" x="1082" y="428">Human review workflow</text>
+
+  <path class="arrow" d="M196 219 H208" />
+  <path class="arrow" d="M324 219 H400" />
+  <path class="arrow" d="M532 219 H612" />
+  <path class="arrow" d="M766 219 H800" />
+  <path class="arrow" d="M892 198 V216" />
+  <path class="arrow" d="M892 282 V300" />
+  <path class="arrow" d="M800 333 H766" />
+  <path class="arrow" d="M689 260 V288" />
+  <path class="arrow" d="M689 354 V370" />
+  <path class="arrow" d="M766 403 H1060" />
+  <path class="arrow-future" d="M1256 398 H1276 V268 H1256" />
+
+  <text class="note" x="48" y="480">Demo1 boundary: deterministic evidence flow with public-safe fixtures and optional one-call Bedrock drafting. Future AWS observability and human review are planned paths, not live production claims.</text>
+  <text class="note" x="48" y="502">The review pack is for human pre-visit review only. It does not certify RAMS, approve work, provide emergency guidance, scrape live planning portals, or use real client data.</text>
 </svg>
