@@ -85,10 +85,10 @@ The deterministic evaluation runner covers:
 
 ## Remaining Gates
 
-| Gate | Owner | Status |
+| Gate | Responsible Party | Status |
 | --- | --- | --- |
-| Teammate feedback | Team / War Room | Ready to collect through GitHub issue template. |
-| Stopwatch baseline | War Room / QA | Pending before numeric speed-up claims. |
-| Fallback recording | QA Demo Lead | Runbook ready; actual recording pending before final demo package. |
-| AWS budget/payment guardrail | Boyong | Pending before heavy live AWS use. |
-| Hosted public endpoint | War Room | Deferred unless Codespaces fails for teammates or submission needs it. |
+| Teammate feedback | Project team | Ready to collect through GitHub issue template. |
+| Stopwatch baseline | Demo reviewer | Pending before numeric speed-up claims. |
+| Fallback recording | Demo reviewer | Runbook ready; actual recording pending before final demo package. |
+| AWS budget/payment guardrail | AWS account owner | Pending before heavy live AWS use. |
+| Hosted public endpoint | Project team | Deferred unless Codespaces fails for teammates or submission needs it. |

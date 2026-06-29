@@ -99,7 +99,7 @@ Use demo fixture data only. Do not enter real client sites, confidential project
 | Synthetic fallback pack | Change `Data pack` to `Synthetic default`, then click `Run`. | App still works using the original synthetic fixture path. |
 | Missing planning fixture | Turn off `Planning fixture`, then click `Run`. | App still works and explains planning evidence limitations. |
 | Map fallback | Turn on `Map fallback`, then click `Run`. | Trace shows geospatial loading using fallback. |
-| Bedrock disabled/fallback | Leave `Bedrock` on, but run without AWS config, or ask War Room to simulate failure. | App still works; trace shows Bedrock as disabled or fallback and keeps deterministic briefing. |
+| Bedrock disabled/fallback | Leave `Bedrock` on, but run without AWS config, or ask a project maintainer to simulate failure. | App still works; trace shows Bedrock as disabled or fallback and keeps deterministic briefing. |
 | Safety refusal | Click `Safety test`. | Agent refuses certified RAMS or work-approval claims. |
 | Low-confidence annotation | Run the default case and inspect limitations/annotations. | At least one item is labelled low confidence. |
 | Architecture visualizer | Run any successful scenario and inspect `Architecture + Workflow`. | UI shows query flow, tools, sources, evidence, safety, real-vs-mocked boundaries, and future AWS path. |

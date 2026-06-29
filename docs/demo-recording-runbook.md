@@ -84,7 +84,7 @@ The recording is not usable as final proof if:
 - Keep the browser zoom at a readable level.
 - Use a desktop viewport first. Mobile proof can be a separate clip.
 - Keep terminal windows out of the recording unless showing the check result.
-- Do not show AWS account pages, credentials, billing pages, SSO cache, `.env`, API keys, or private War Room notes.
+- Do not show AWS account pages, credentials, billing pages, SSO cache, `.env`, API keys, or private coordination notes.
 - If live Bedrock is demonstrated, state that it is optional and budget-gated; default teammate testing remains no-AWS.
 
 ## File Naming

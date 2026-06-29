@@ -8,7 +8,7 @@ Do not commit:
 
 - API keys, AWS credentials, SSO cache files, Google Maps keys, Cesium ion tokens, or `.env` files;
 - real client data, private site records, private planning documents, screenshots from confidential projects, or access-controlled material;
-- private strategy notes, career/application framing, private messages, or local war-room coordination files.
+- private strategy notes, private messages, or local coordination files.
 
 Use only the included demo fixtures unless a public-safe source has been reviewed and attributed.
 
