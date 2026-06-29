@@ -6,11 +6,11 @@ This page is a public-safe readiness snapshot for teammates, judges, and contrib
 
 ## Current Status
 
-Latest verified snapshot:
+Current evidence snapshot:
 
-- Commit: `2f3e105`
-- GitHub Actions: run `28363827560` passed on `main`.
-- Full local no-AWS verification: `powershell -ExecutionPolicy Bypass -File .\scripts\check-demo.ps1` passed with backend/API tests, deterministic evaluation, frontend build, and HTTP runtime smoke.
+- GitHub Actions runs on `main` and pull requests; use the README badge or Actions tab for the latest public CI status.
+- Full local no-AWS verification has passed with backend/API tests, deterministic evaluation, frontend build, and HTTP runtime smoke.
+- Exact commit/run evidence is tracked privately by the project team so this public page does not need to change after every docs-only commit.
 
 | Area | Status | Evidence |
 | --- | --- | --- |
