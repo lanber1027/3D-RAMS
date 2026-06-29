@@ -62,6 +62,8 @@ The UI defaults to the cached `public-lambeth-thames` pack. Use the `Data pack` 
 
 For the 90-second walkthrough, before/after proof, and recording checklist, use [docs/demo-proof.md](docs/demo-proof.md).
 
+For a step-by-step fallback recording sequence and pass/fail criteria, use [docs/demo-recording-runbook.md](docs/demo-recording-runbook.md).
+
 For repeatable local proof of the backend workflow, run:
 
 ```bash

@@ -71,6 +71,8 @@ For repeatable backend proof, run `python scripts/evaluate-demo.py` from the rep
 
 ## Recording Checklist
 
+Use [demo-recording-runbook.md](demo-recording-runbook.md) for the full step-by-step recording sequence, fallback takes, and pass/fail criteria.
+
 - Start from a clean browser tab.
 - Confirm `Data pack` is `Lambeth public cache`.
 - Run the default scenario.

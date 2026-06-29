@@ -78,6 +78,7 @@ The deterministic evaluation runner covers:
 - Run `bash scripts/check-demo.sh` or the PowerShell equivalent.
 - Confirm the latest GitHub Actions run is green.
 - Use [demo-proof.md](demo-proof.md) for the 90-second script and recording checklist.
+- Use [demo-recording-runbook.md](demo-recording-runbook.md) for fallback recording acceptance criteria.
 - Keep the demo on fixture data unless a new public-safe source adapter has been reviewed.
 - State clearly what is real, cached, mocked, fallback, and future.
 - Do not claim certified RAMS, emergency guidance, work approval, or production deployment.
@@ -88,6 +89,6 @@ The deterministic evaluation runner covers:
 | --- | --- | --- |
 | Teammate feedback | Team / War Room | Ready to collect through GitHub issue template. |
 | Stopwatch baseline | War Room / QA | Pending before numeric speed-up claims. |
-| Fallback recording | QA Demo Lead | Pending before final demo package. |
+| Fallback recording | QA Demo Lead | Runbook ready; actual recording pending before final demo package. |
 | AWS budget/payment guardrail | Boyong | Pending before heavy live AWS use. |
 | Hosted public endpoint | War Room | Deferred unless Codespaces fails for teammates or submission needs it. |

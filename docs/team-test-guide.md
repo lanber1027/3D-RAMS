@@ -240,6 +240,7 @@ Expected response:
 - Briefing mode pill: deterministic disabled, Bedrock real, or fallback.
 - `Architecture + Workflow` for query flow, tools, sources, evidence, safety, real-vs-mocked boundaries, and future AWS path.
 - `docs/architecture.md` for written architecture diagrams and trace shape.
+- `docs/demo-recording-runbook.md` for the exact fallback recording sequence if you are helping prepare a demo clip.
 
 ## Troubleshooting
 
