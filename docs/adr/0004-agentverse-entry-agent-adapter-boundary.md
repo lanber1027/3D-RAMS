@@ -125,3 +125,15 @@ The next AgentCore implementation step should focus on orchestration structure:
 ## Next Review Trigger
 
 Revisit this ADR when the team has one working AgentVerse entry agent calling the adapter and one AWS AgentCore deployment reachable through the adapter with IAM signing.
+
+## Implementation Update 2026-06-29
+
+The ASI:ONE / AgentVerse proof of concept has been imported into this repository:
+
+- AgentVerse handle: `@3d-rams`;
+- imported entry runtime source: `app/MyAgent`;
+- imported hosted adapter source: `agentverse/hosted_adapter.py`;
+- imported entry Harness: `app/MyHarness`;
+- AgentCore config now declares both `rams_agentcore` and `MyAgent` runtimes.
+
+The existing cloud runtime name from the proof of concept is intentionally documented without committing its ARN or AWS account id. The team still needs to decide whether to import the existing deployed runtime into this AgentCore project or redeploy `MyAgent` from this repository and update the AgentVerse hosted adapter environment.

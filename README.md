@@ -82,6 +82,8 @@ For AgentCore invocation shape and validation behavior, see [docs/api-contract.m
 
 For the AgentVerse entry-agent and AWS AgentCore adapter boundary, see [docs/agentverse-agentcore-adapter-contract.md](docs/agentverse-agentcore-adapter-contract.md) and [ADR 0004](docs/adr/0004-agentverse-entry-agent-adapter-boundary.md).
 
+For the imported ASI:ONE / AgentVerse proof of concept runtime and `@3d-rams` hosted adapter shape, see [docs/agentverse-asi-one-runtime.md](docs/agentverse-asi-one-runtime.md).
+
 To run the full local verification stack before sharing changes in Codespaces/Linux/macOS:
 
 ```bash

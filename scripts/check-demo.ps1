@@ -32,12 +32,14 @@ if ($Install) {
 
 Write-Host "Compiling AgentCore package, tests, and scripts"
 & $PythonBin -m compileall `
+    app/MyAgent `
     app/rams_agentcore/main.py `
     app/rams_agentcore/mcp_client `
     app/rams_agentcore/model `
     app/rams_agentcore/skills `
     app/rams_agentcore/tests `
     app/rams_agentcore/three_d_rams `
+    agentverse `
     scripts
 
 Write-Host "Running AgentCore workflow and invocation tests"
