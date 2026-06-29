@@ -34,6 +34,7 @@ class RuntimeConfig:
     bedrock_model_id: str
     bedrock_max_tokens: int
     bedrock_temperature: float
+    bedrock_max_model_calls: int
     bedrock_mock_response: bool
     bedrock_simulate_failure: bool
 
@@ -51,6 +52,7 @@ class RuntimeConfig:
             ),
             bedrock_max_tokens=_env_int("BEDROCK_MAX_TOKENS", 1200),
             bedrock_temperature=_env_float("BEDROCK_TEMPERATURE", 0.2),
+            bedrock_max_model_calls=min(max(_env_int("BEDROCK_MAX_MODEL_CALLS", 4), 0), 4),
             bedrock_mock_response=_env_bool("BEDROCK_MOCK_RESPONSE", False),
             bedrock_simulate_failure=_env_bool("BEDROCK_SIMULATE_FAILURE", False),
         )
@@ -64,5 +66,6 @@ class RuntimeConfig:
             "modelId": self.bedrock_model_id if self.bedrock_enabled else None,
             "maxTokens": self.bedrock_max_tokens if self.bedrock_enabled else None,
             "temperature": self.bedrock_temperature if self.bedrock_enabled else None,
+            "maxModelCalls": self.bedrock_max_model_calls,
             "fallbackReason": fallback_reason,
         }

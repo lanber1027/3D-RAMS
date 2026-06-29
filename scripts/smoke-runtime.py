@@ -127,7 +127,7 @@ def _validate_agent_response(result: dict) -> None:
         raise AssertionError("/api/run returned no evidence entries")
     if not result["trace"]:
         raise AssertionError("/api/run returned no trace entries")
-    if result["runtime"].get("briefingMode") not in {"disabled", "fallback", "real", "mocked"}:
+    if result["runtime"].get("briefingMode") not in {"deterministic", "disabled", "fallback", "real", "mocked"}:
         raise AssertionError(f"unexpected briefingMode: {result['runtime'].get('briefingMode')}")
     if result["safety"].get("allowed") is not True:
         raise AssertionError("default no-AWS smoke request should remain inside the safety boundary")

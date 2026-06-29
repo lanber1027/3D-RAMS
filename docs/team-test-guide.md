@@ -1,6 +1,6 @@
 # Team Test Guide
 
-Use this guide to test the Demo1 flow before judging or submission. The app is intentionally local-first: it should run with public fixtures only, without Google Maps keys, Cesium ion tokens, live planning portals, client data, or real site data. Bedrock mode is available only when the backend has AWS credentials and `ENABLE_BEDROCK=true`; deterministic fallback remains available.
+Use this guide to test the Demo1 flow before judging or submission. The app is intentionally local-first: it should run with public fixtures only, without Google Maps keys, Cesium ion tokens, live planning portals, client data, or real site data. Live Bedrock mode is available only when the backend has AWS credentials and `ENABLE_BEDROCK=true`; deterministic fallback remains available.
 
 3D-RAMS turns a coordinate into an inspectable 3D pre-visit briefing pack. The default UI uses the cached `public-lambeth-thames` fixture pack for a Lambeth / Thames public-data example anchored on 8 Albert Embankment. It does not call live Planning Data, OpenStreetMap, Environment Agency, Lambeth, TfL, Google, or OS services during the demo.
 
@@ -12,9 +12,10 @@ Use this guide to test the Demo1 flow before judging or submission. The app is i
 6. candidate hazard extraction;
 7. 3D annotations;
 8. RAMS-style briefing;
-9. optional Bedrock briefing generation;
+9. optional LLM-first Bedrock planning/synthesis;
 10. safety gate;
-11. evidence register, trace, and architecture visualizer.
+11. deterministic fallback if the model path is unavailable;
+12. evidence register, trace, and architecture visualizer.
 
 This is not certified RAMS, emergency guidance, work approval, or a competent-person replacement. Treat all output as a demo briefing for human review.
 
@@ -85,7 +86,7 @@ Leave the default coordinate and options unchanged, then click:
 `Run`
 
 Expected result: the app shows a 3D scene, annotations, RAMS-style briefing, evidence register, agent trace, and Architecture + Workflow visualizer.
-The runtime pill should show `disabled`, `real`, or `fallback` for briefing mode.
+The runtime explainer should show either LLM-first mode or deterministic-only mode, and the runtime pill should show `disabled`, `real`, or `fallback` for briefing mode.
 The `Data pack` control should show `Lambeth public cache` by default.
 
 ### Step 7: Run Test Scenarios
@@ -99,10 +100,10 @@ Use demo fixture data only. Do not enter real client sites, confidential project
 | Synthetic fallback pack | Change `Data pack` to `Synthetic default`, then click `Run`. | App still works using the original synthetic fixture path. |
 | Missing planning fixture | Turn off `Planning fixture`, then click `Run`. | App still works and explains planning evidence limitations. |
 | Map fallback | Turn on `Map fallback`, then click `Run`. | Trace shows geospatial loading using fallback. |
-| Bedrock disabled/fallback | Leave `Bedrock` on, but run without AWS config, or ask a project maintainer to simulate failure. | App still works; trace shows Bedrock as disabled or fallback and keeps deterministic briefing. |
+| Bedrock disabled/fallback | Leave `Live Bedrock` on, but run without AWS config, or ask a project maintainer to simulate failure. | App still works; the LLM-first panel and trace show Bedrock as disabled or fallback and keep deterministic briefing. |
 | Safety refusal | Click `Safety test`. | Agent refuses certified RAMS or work-approval claims. |
 | Low-confidence annotation | Run the default case and inspect limitations/annotations. | At least one item is labelled low confidence. |
-| Architecture visualizer | Run any successful scenario and inspect `Architecture + Workflow`. | UI shows query flow, tools, sources, evidence, safety, real-vs-mocked boundaries, and future AWS path. |
+| Architecture visualizer | Run any successful scenario and inspect `LLM-First Runtime` and `Architecture + Workflow`. | UI shows model plan, allowlisted tools, sources, evidence, safety, real-vs-mocked boundaries, deterministic fallback, and future AWS path. |
 | Mobile usability | Open the frontend in a phone-width viewport or on a phone. | Run controls remain reachable, proof surfaces are readable, and no primary action is blocked. |
 
 ### Step 8: Submit Feedback
@@ -215,7 +216,7 @@ Low-volume smoke test:
 python scripts/bedrock-smoke.py
 ```
 
-Keep usage low: one Bedrock call per agent run, short fixture prompts only, and no real client/site data.
+Keep usage low: no more than 4 Bedrock model calls per maintainer run, short fixture prompts only, and no real client/site data.
 
 ## Health Check
 
@@ -237,7 +238,9 @@ Expected response:
 - The RAMS-style briefing and its limitations.
 - Evidence register entries and source labels.
 - Trace rows with tool names and statuses.
+- Runtime explainer: LLM-first when live Bedrock is active, deterministic-only otherwise.
 - Briefing mode pill: deterministic disabled, Bedrock real, or fallback.
+- `LLM-First Runtime` for model plan, allowlisted tools, evidence flow, synthesis, safety, and deterministic fallback.
 - `Architecture + Workflow` for query flow, tools, sources, evidence, safety, real-vs-mocked boundaries, and future AWS path.
 - `docs/architecture.md` for written architecture diagrams and trace shape.
 - `docs/impact-baseline.md` if you are helping measure manual-vs-agent timing.

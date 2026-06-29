@@ -36,6 +36,8 @@ All fields are optional. Unknown fields are ignored so teammate test payloads ca
 | `includePlanningFixture` | boolean | Defaults to `true`. Set `false` to test missing planning/context behavior. |
 | `simulateMapFailure` | boolean | Defaults to `false`. Set `true` to force the geospatial fallback path. |
 | `useBedrock` | boolean | Defaults to `true`. Bedrock is still used only when backend environment settings enable it. |
+| `agentMode` | string or null | Optional execution mode: `llm-planner`, `deterministic`, or `bedrock-briefing`. When omitted, `useBedrock=true` selects `llm-planner`; `useBedrock=false` selects `deterministic`. |
+| `agent_mode` | string or null | Backward-compatible alias for `agentMode`. |
 | `additionalRequest` | string | Optional user instruction. Unsafe RAMS/work-approval claims are blocked. |
 
 Example no-AWS request:
@@ -59,6 +61,11 @@ The response is an inspectable review pack. Important top-level fields include:
 | --- | --- |
 | `request` | Normalized request summary used by the agent. |
 | `runtime` | Fixture mode, Bedrock mode, fallback reason, and live-call status. |
+| `llmPlan` | Planner status, rationale, requested tool calls, allowlist, and fallback reason when `llm-planner` is used or requested. |
+| `llmToolCalls` | Allowlisted local tool-call records accepted from the planner. Empty for deterministic or legacy briefing-only runs. |
+| `modelCalls` | Model invocation records with phase, status, model id, region, latency, and call-budget metadata when a model call actually occurred. |
+| `tokenUsage` | Aggregate token usage when the provider response exposes it; otherwise `null`. |
+| `fallback` | Deterministic fallback status, trigger, and reason. |
 | `location` | Resolved site label and coordinate. |
 | `scene` | 3D scene configuration for the frontend viewer. |
 | `hazards` | Candidate hazards extracted from cached/synthetic evidence. |

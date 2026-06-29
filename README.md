@@ -4,7 +4,7 @@
 
 3D-RAMS is a hackathon Demo1 agent that turns a site coordinate into a 3D pre-visit briefing pack.
 
-The first slice is intentionally local-first: it can run without Google Maps keys, Cesium ion keys, live planning-portal scraping, or hosted infrastructure. The default UI uses a cached public Lambeth / Thames fixture pack, and the production-shaped path can also make one Amazon Bedrock call per run for briefing generation when AWS credentials are configured, while preserving deterministic fallback.
+The first slice is intentionally local-first: it can run without Google Maps keys, Cesium ion keys, live planning-portal scraping, or hosted infrastructure. The default UI uses a cached public Lambeth / Thames fixture pack. When `ENABLE_BEDROCK=true` and maintainer AWS credentials are configured, the run becomes LLM-first for planning/synthesis while keeping deterministic tools, trace, safety, and a no-AWS fallback path.
 
 ## Problem Statement
 
@@ -27,17 +27,19 @@ This rendered diagram is the README-scale view of the workflow in [docs/architec
 5. The agent loads cached-public or synthetic planning/context notes.
 6. The agent extracts candidate hazard notes.
 7. The agent creates 3D annotations.
-8. The agent generates a RAMS-style briefing.
-9. A safety gate blocks certified RAMS, work approval, and emergency guidance claims.
-10. The UI shows the 3D scene, briefing, evidence register, trace, and architecture visualizer.
+8. The model planner can synthesize a plan and call only allowlisted tools when live Bedrock is enabled.
+9. The agent synthesizes a RAMS-style briefing from tool results and evidence.
+10. A safety gate blocks certified RAMS, work approval, and emergency guidance claims.
+11. Deterministic fallback remains available if the model step is disabled, rejected, or fails.
+12. The UI shows the 3D scene, briefing, evidence register, trace, runtime mode, and architecture visualizer.
 
 ## Real vs Mocked
 
 | Component | Demo1 Status | Notes |
 | --- | --- | --- |
-| Agent workflow | Real Python code | Tool sequence, evidence, trace, safety gate, deterministic fallback, and response shape are implemented. |
+| Agent workflow | Real Python code | Tool sequence, evidence, trace, safety gate, deterministic fallback, and response shape are implemented. Frontend now explains both LLM-first and deterministic runs. |
 | Public data pack | Cached public fixture | `fixtures/public-lambeth-thames` includes source metadata for a Lambeth / Thames public-data pack anchored on 8 Albert Embankment. Runtime makes no live public-data calls. |
-| Bedrock briefing | Optional live AWS path | Uses one `InvokeModel` call per run when `ENABLE_BEDROCK=true`; deterministic briefing remains the fallback. |
+| Bedrock planner + briefing | Optional live AWS path | Maintainer-only live Bedrock path uses a bounded planner/synthesis path, capped at 4 model calls per run, when `ENABLE_BEDROCK=true`; deterministic fallback remains available. |
 | 3D viewer | Real React/Vite + CesiumJS UI | Uses a token-free Cesium canvas plus local scene overlay and annotations. |
 | Geospatial features | Cached-public or mocked fixture | Default pack uses cached public-source metadata; synthetic fallback uses `fixtures/geospatial_features.json`. |
 | Planning/context notes | Cached-public or synthetic fixture | Default pack uses cached public-safe notes and source metadata; synthetic fallback uses `fixtures/planning_report.txt`. |
@@ -106,9 +108,13 @@ The check runs backend compile/tests, deterministic evaluation, frontend product
 
 ## Bedrock Mode
 
-The app defaults to deterministic fallback unless the backend is started with Bedrock enabled.
+The app defaults to deterministic fallback unless the backend is started with Bedrock enabled. In the current milestone, the intended public explanation is:
 
-Use the full optional setup guide in [docs/aws-bedrock-setup.md](docs/aws-bedrock-setup.md). Confirm cost guardrails before repeated live testing; the current recommendation is a small budget alert, one Bedrock call per agent run, `BEDROCK_MAX_TOKENS=1200`, and `BEDROCK_TEMPERATURE=0.2`.
+- `Live Bedrock enabled`: LLM-first planner/synthesis path, with allowlisted tool calls, evidence trace, safety gate, and deterministic fallback.
+- `No AWS / Bedrock disabled`: deterministic agent path only.
+- `Future AWS path`: CloudWatch, S3, DynamoDB, Guardrails, and AgentCore remain later production-shaped stages.
+
+Use the full optional setup guide in [docs/aws-bedrock-setup.md](docs/aws-bedrock-setup.md). Confirm cost guardrails before repeated live testing; the current recommendation is a small budget alert, a maximum of 4 Bedrock model calls per maintainer run, `BEDROCK_MAX_TOKENS=1200`, and `BEDROCK_TEMPERATURE=0.2`.
 
 Recommended local settings:
 
@@ -119,6 +125,7 @@ AWS_REGION=eu-west-2
 BEDROCK_MODEL_ID=anthropic.claude-3-7-sonnet-20250219-v1:0
 BEDROCK_MAX_TOKENS=1200
 BEDROCK_TEMPERATURE=0.2
+BEDROCK_MAX_MODEL_CALLS=4
 ```
 
 Run a low-volume smoke test:
@@ -127,7 +134,7 @@ Run a low-volume smoke test:
 python scripts/bedrock-smoke.py
 ```
 
-Do not commit `.env`, AWS credentials, SSO cache files, API keys, or real client/site data. The UI shows whether a run used Bedrock, deterministic mode, or fallback.
+Do not commit `.env`, AWS credentials, SSO cache files, API keys, or real client/site data. The UI shows whether a run used LLM-first runtime, deterministic mode, or fallback. Live Bedrock remains maintainer-only.
 
 ## Local Quickstart
 
@@ -179,21 +186,21 @@ curl http://localhost:8000/openapi.json
 | Cached public pack | Leave `Data pack` as `Lambeth public cache`, click `Run` | Sources include cached Planning Data / flood context and OSM-style access context with attribution and freshness labels. |
 | Missing data | Disable `Planning fixture`, click `Run` | Briefing continues with a planning-evidence limitation. |
 | Tool failure | Enable `Map fallback`, click `Run` | Trace marks geospatial loading as `fallback`. |
-| Bedrock fallback | Enable Bedrock in UI while backend has no AWS config, or set `BEDROCK_SIMULATE_FAILURE=true` | Trace marks Bedrock step as `disabled` or `fallback`; deterministic briefing remains available. |
+| Bedrock fallback | Enable `Live Bedrock` in UI while backend has no AWS config, or set `BEDROCK_SIMULATE_FAILURE=true` | LLM-first panel and trace mark the model step as `disabled` or `fallback`; deterministic briefing remains available. |
 | Unsafe request | Click `Safety test` | Safety gate blocks certified RAMS/work approval behavior. |
 | Low confidence | Normal run | Imagery-derived bridge indicator is labelled low confidence. |
-| Architecture visualizer | Normal run | UI shows tool sequence, boundaries, AWS path, and real-vs-mocked status. |
+| Architecture visualizer | Normal run | UI shows model plan, allowlisted tools, evidence flow, safety gate, AWS path, and real-vs-mocked status. |
 
 ## AWS Production Path
 
 Demo1 trace and response objects are shaped to map naturally to an AWS implementation:
 
-- Amazon Bedrock for the live model-assisted briefing step.
+- Amazon Bedrock for the maintainer-only LLM planner and synthesis path.
 - DynamoDB for versioned project state, approvals, and rollback records.
 - S3 for evidence packs, exported briefings, screenshots, and source documents.
 - CloudWatch for trace, latency, cost, and failure visibility.
 - Guardrails for unsafe claim and policy filtering.
-- AgentCore Runtime and Observability as a stretch layer after the plain Bedrock-backed loop works.
+- AgentCore Runtime and Observability as a stretch layer after the bounded Bedrock planner loop is proven.
 
 See [docs/architecture.md](docs/architecture.md) for the workflow and AWS diagrams.
 

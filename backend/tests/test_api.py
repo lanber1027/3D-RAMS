@@ -93,6 +93,30 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("latitude", request_schema["properties"])
         self.assertIn("longitude", request_schema["properties"])
         self.assertIn("fixturePack", request_schema["properties"])
+        self.assertIn("agentMode", request_schema["properties"])
+
+    def test_run_endpoint_exposes_llm_first_response_contract_in_no_aws_fallback(self):
+        with EnvPatch(ENABLE_BEDROCK="false"):
+            response = self.client.post(
+                "/api/run",
+                json={"fixturePack": "public-lambeth-thames", "useBedrock": True},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.json()
+        self.assertEqual(result["request"]["agentMode"], "llm-planner")
+        self.assertEqual(result["runtime"]["agentMode"], "llm-planner")
+        self.assertEqual(result["runtime"]["activeAgentMode"], "deterministic-fallback")
+        self.assertEqual(result["runtime"]["briefingMode"], "fallback")
+        self.assertIn("llmPlan", result)
+        self.assertIn("llmToolCalls", result)
+        self.assertIn("modelCalls", result)
+        self.assertIn("tokenUsage", result)
+        self.assertIn("fallback", result)
+        self.assertEqual(result["llmPlan"]["status"], "fallback")
+        self.assertEqual(result["llmToolCalls"], [])
+        self.assertEqual(result["modelCalls"], [])
+        self.assertEqual(result["fallback"]["status"], "fallback")
 
     def test_run_endpoint_reports_missing_planning_warning(self):
         with EnvPatch(ENABLE_BEDROCK="false"):

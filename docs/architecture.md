@@ -4,22 +4,40 @@ This document is the public, living architecture reference for Demo1. It explain
 
 3D-RAMS creates a pre-visit briefing pack for human review. It does not create certified RAMS, emergency guidance, approval to work, or a competent-person replacement.
 
+## Runtime Modes
+
+The milestone now has three public-safe runtime interpretations:
+
+- `Current live Bedrock planner`: maintainer-only path when `ENABLE_BEDROCK=true` and AWS credentials are present. The model plans/synthesizes, but tools, evidence, and safety remain explicit and inspectable.
+- `Current no-AWS fallback`: deterministic local path when Bedrock is disabled, unavailable, rejected by safety, or fails.
+- `Future AWS services`: CloudWatch, S3, DynamoDB, Guardrails, and AgentCore are production-shaped follow-on stages, not a current deployment claim.
+
 ## Query-To-Brief Flow
 
 ```mermaid
 flowchart LR
     User["User enters coordinate and test options"] --> UI["React/Vite UI"]
     UI --> API["FastAPI POST /api/run"]
-    API --> Agent["Deterministic Demo1 agent loop"]
+    API --> Agent["Demo1 agent runtime"]
     Agent --> Locate["Resolve location or cached fixture pack"]
-    Agent --> Geo["Load synthetic, cached-public, or fallback features"]
-    Agent --> Scene["Build 3D scene config"]
-    Agent --> Planning["Load cached-public or synthetic planning context"]
-    Agent --> Hazards["Extract candidate hazard notes"]
-    Agent --> Annotations["Create 3D annotations"]
-    Agent --> Brief["Generate deterministic briefing"]
-    Agent --> BedrockBrief["Optional Bedrock briefing"]
+    Agent --> Planner{"Bedrock enabled and available?"}
+    Planner -->|"yes"| ModelPlan["Model plan and synthesis"]
+    Planner -->|"no"| Deterministic["Deterministic plan path"]
+    ModelPlan --> ToolGate["Allowlisted tool boundary"]
+    Deterministic --> ToolGate
+    ToolGate --> Geo["Load synthetic, cached-public, or fallback features"]
+    ToolGate --> Scene["Build 3D scene config"]
+    ToolGate --> Planning["Load cached-public or synthetic planning context"]
+    ToolGate --> Hazards["Extract candidate hazard notes"]
+    ToolGate --> Annotations["Create 3D annotations"]
+    Geo --> Synthesis["Briefing synthesis"]
+    Planning --> Synthesis
+    Hazards --> Synthesis
+    Annotations --> Synthesis
     Agent --> Safety["Safety gate"]
+    Synthesis --> Safety
+    ModelPlan -. "if invalid, disabled, or failed" .-> Fallback["Deterministic fallback"]
+    Fallback --> Safety
     Safety --> Output["Scene, briefing, evidence, trace, visualizer"]
     Output --> UI
 ```
@@ -70,19 +88,27 @@ sequenceDiagram
     participant UI as Frontend
     participant API as FastAPI
     participant A as Agent Loop
+    participant M as Bedrock Planner
     participant F as Fixtures
 
     U->>UI: Submit coordinate and options
     UI->>API: POST /api/run
     API->>A: run_site_briefing
     A->>A: resolve_location
+    alt live Bedrock enabled
+        A->>M: send structured context and planner prompt
+        M-->>A: plan plus allowlisted tool intent
+    else no-AWS or disabled
+        A->>A: deterministic planning path
+    end
     A->>F: load_geospatial_features
     A->>A: build_scene_config
     A->>F: load_planning_context
     A->>A: extract_hazard_notes
     A->>A: create_annotations
-    A->>A: generate_site_brief
-    A->>A: generate_bedrock_briefing if enabled
+    A->>M: synthesize briefing from evidence if enabled
+    M-->>A: draft briefing
+    A->>A: deterministic fallback if model unavailable/invalid
     A->>A: safety_gate
     A-->>API: JSON run object
     API-->>UI: scene, briefing, evidence, sources, trace, architecture
@@ -107,7 +133,20 @@ sequenceDiagram
     A->>Obs: Emit trace, latency, status, and evidence ids
 ```
 
-Demo1 can run without Bedrock, but it now has a live Bedrock briefing path when `ENABLE_BEDROCK=true`. The deterministic briefing remains the fallback, and the Bedrock step is limited to one model call per agent run. The default UI uses the cached `public-lambeth-thames` pack anchored on 8 Albert Embankment. Runtime does not call live Planning Data, OpenStreetMap, Environment Agency, Lambeth, TfL, Google, or OS services.
+Demo1 can run without Bedrock, but it now has a live Bedrock LLM-first path when `ENABLE_BEDROCK=true`. The deterministic briefing remains the fallback, and the planner/synthesis path is capped at 4 model calls per maintainer run. The default UI uses the cached `public-lambeth-thames` pack anchored on 8 Albert Embankment. Runtime does not call live Planning Data, OpenStreetMap, Environment Agency, Lambeth, TfL, Google, or OS services.
+
+## LLM-First Control Surface
+
+The frontend now explains the run in this order:
+
+1. model plan;
+2. allowlisted tool calls;
+3. tool results and evidence;
+4. synthesis;
+5. safety gate;
+6. deterministic fallback.
+
+The UI is intentionally defensive. If backend fields such as `agentMode`, `llmPlan`, `llmToolCalls`, `modelCalls`, `tokenUsage`, or `fallback` are absent, the visualizer falls back to `runtime` and `trace` data instead of breaking.
 
 ## Evidence, Trace, And Observability Flow
 
@@ -152,13 +191,13 @@ The safety gate is deliberately visible. Judges and teammates should be able to 
 
 | Area | Current Source | Current Status | Visible In UI | Production AWS Mapping | Upgrade Risk |
 | --- | --- | --- | --- | --- | --- |
-| Agent loop | Python backend | Real deterministic code plus optional Bedrock briefing | Tool timeline and trace | Bedrock model/tool planning | Model variability and evaluation |
+| Agent loop | Python backend | Real deterministic code plus optional Bedrock planner/synthesis | Tool timeline, LLM-first explainer, and trace | Bedrock model/tool planning | Model variability and evaluation |
 | Public fixture pack | `fixtures/public-lambeth-thames` | Cached public-source metadata and attribution files | Source register, evidence, trace, briefing | S3 source pack plus source registry | Source freshness, licence handling, and overclaiming |
 | Request state | Browser form payload | Real | Run overview | DynamoDB run/session record | Data privacy and retention |
 | 3D viewer | React/Vite + CesiumJS | Real token-free local scene plus overlay | 3D scene | Static frontend plus API runtime | Performance on low-power devices |
 | Geospatial features | Synthetic fixture or cached public pack | Mocked, cached-public, or fallback | Sources and annotations | S3 source object plus live geospatial APIs | Licensing, freshness, key management |
 | Planning context | Synthetic fixture or cached public pack | Synthetic, cached-public, or unavailable | Sources, evidence, briefing limits | S3 documents plus Bedrock extraction | Scraping reliability and citations |
-| Bedrock briefing | Amazon Bedrock when configured | Optional live AWS call with deterministic fallback | Runtime mode, trace, and briefing | Evaluated Bedrock adapter with CloudWatch traces | Cost, model access, latency, and fallback quality |
+| Bedrock planner/synthesis | Amazon Bedrock when configured | Optional maintainer-only live AWS call with deterministic fallback | Runtime mode, LLM-first panel, trace, and briefing | Evaluated Bedrock adapter with CloudWatch traces | Cost, model access, latency, and fallback quality |
 | Safety gate | Python rules | Real Demo1 policy | Safety pill and visualizer | Guardrails plus human review queue | Overclaiming or hidden unsafe edge cases |
 | Evidence register | API response | Real response object | Evidence cards | S3 evidence pack | Source traceability |
 | Observability | JSON trace | Real response object | Trace and visualizer | CloudWatch logs, metrics, traces | Noise and cost control |
@@ -202,7 +241,12 @@ Core fields:
 
 - `request`: submitted site name, coordinate, goal, toggles, and additional request;
 - `sources`: real, mocked, fallback, unavailable, and future source register;
-- `runtime`: deterministic, Bedrock, disabled, or fallback briefing mode;
+- `runtime`: deterministic, Bedrock, disabled, fallback, and optional `agentMode` metadata;
+- `llmPlan`: optional model plan summary or structured planner payload;
+- `llmToolCalls`: optional allowlisted tool call records returned by the planner/runtime;
+- `modelCalls`: optional model invocation records, latency, and token usage;
+- `tokenUsage`: optional aggregate token counts for public runtime explanation;
+- `fallback`: optional deterministic fallback reason and trigger;
 - `trace`: ordered tool calls with source ids, evidence ids, fallback reason, model metadata, and AWS mapping;
 - `evidence`: evidence register shown to the user;
 - `safety`: allow/block decision, triggered rules, review requirement, and decision id;

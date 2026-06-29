@@ -57,6 +57,102 @@ def generate_bedrock_briefing(
     return briefing, _metadata(config, started, "bedrock")
 
 
+def generate_bedrock_tool_plan(
+    *,
+    config: RuntimeConfig,
+    request_summary: dict[str, Any],
+    tool_schemas: list[dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if config.bedrock_simulate_failure:
+        raise BedrockAdapterError("Simulated Bedrock failure requested by BEDROCK_SIMULATE_FAILURE.")
+    if config.bedrock_max_model_calls < 1:
+        raise BedrockAdapterError("Bedrock model call budget is zero.")
+
+    started = time.perf_counter()
+    if config.bedrock_mock_response:
+        scenario = os.getenv("BEDROCK_MOCK_PLANNER_SCENARIO", "").strip().lower()
+        plan = _mock_bedrock_tool_plan(scenario)
+        return plan, _metadata(config, started, "bedrock-mock", phase="planner-plan", model_call_count=1)
+
+    response_text = _invoke_bedrock_json(
+        config,
+        {
+            "task": "Plan bounded local tool calls for a 3D-RAMS pre-visit review pack.",
+            "safety_boundary": (
+                "Use only the supplied tool names. Do not request shell, file, URL, network, or code execution. "
+                "The final pack is for human review only."
+            ),
+            "required_json_schema": {
+                "rationale": "short string",
+                "tool_calls": [
+                    {
+                        "name": "one allowed tool name",
+                        "arguments": "object, usually empty",
+                    }
+                ],
+            },
+            "request": request_summary,
+            "allowed_tools": tool_schemas,
+            "max_tool_calls": 8,
+        },
+    )
+    plan = _normalise_plan(_extract_json_object(response_text))
+    return plan, _metadata(config, started, "bedrock", phase="planner-plan", model_call_count=1)
+
+
+def generate_bedrock_planner_synthesis(
+    *,
+    config: RuntimeConfig,
+    location: dict[str, Any],
+    hazards: list[dict[str, Any]],
+    deterministic_briefing: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    planning_available: bool,
+    executed_tools: list[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if config.bedrock_simulate_failure:
+        raise BedrockAdapterError("Simulated Bedrock failure requested by BEDROCK_SIMULATE_FAILURE.")
+    if config.bedrock_max_model_calls < 2:
+        raise BedrockAdapterError("Bedrock model call budget is below the planner+synthesis minimum.")
+
+    started = time.perf_counter()
+    if config.bedrock_mock_response:
+        briefing = _mock_bedrock_planner_synthesis(deterministic_briefing, hazards, planning_available, executed_tools)
+        return briefing, _metadata(config, started, "bedrock-mock", phase="planner-synthesis", model_call_count=1)
+
+    response_text = _invoke_bedrock_json(
+        config,
+        {
+            "task": "Synthesize a concise review briefing from bounded local tool outputs.",
+            "safety_boundary": (
+                "Do not certify RAMS, approve work, provide emergency instructions, or replace a competent person. "
+                "Output is for human review only."
+            ),
+            "required_json_schema": {
+                "headline": "string",
+                "summary": ["3 short strings"],
+                "priority_checks": ["up to 5 short strings"],
+                "before_site_visit": ["3 short strings"],
+                "limitations": ["3 to 5 short strings"],
+            },
+            "site": {
+                "label": location.get("label"),
+                "latitude": location.get("latitude"),
+                "longitude": location.get("longitude"),
+                "authority": location.get("authority"),
+            },
+            "hazards": hazards[:8],
+            "evidence": evidence,
+            "planning_available": planning_available,
+            "executed_tools": executed_tools,
+            "deterministic_fallback": deterministic_briefing,
+        },
+    )
+    briefing = _normalise_briefing(_extract_json_object(response_text), deterministic_briefing)
+    briefing["generation_mode"] = "llm-planner"
+    return briefing, _metadata(config, started, "bedrock", phase="planner-synthesis", model_call_count=1)
+
+
 def _anthropic_payload(
     config: RuntimeConfig,
     location: dict[str, Any],
@@ -111,6 +207,49 @@ def _anthropic_payload(
     }
 
 
+def _invoke_bedrock_json(config: RuntimeConfig, prompt: dict[str, Any]) -> str:
+    try:
+        import boto3
+    except ImportError as exc:
+        raise BedrockAdapterError("boto3 is not installed in the backend environment.") from exc
+
+    session_kwargs = {}
+    if config.aws_profile:
+        session_kwargs["profile_name"] = config.aws_profile
+    session = boto3.Session(**session_kwargs)
+    client = session.client("bedrock-runtime", region_name=config.aws_region)
+
+    response = client.invoke_model(
+        modelId=config.bedrock_model_id,
+        contentType="application/json",
+        accept="application/json",
+        body=json.dumps(
+            {
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": config.bedrock_max_tokens,
+                "temperature": config.bedrock_temperature,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Return only valid JSON.\n\n" + json.dumps(prompt, ensure_ascii=True),
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+    )
+    body = json.loads(response["body"].read())
+    return "".join(
+        item.get("text", "")
+        for item in body.get("content", [])
+        if item.get("type") == "text"
+    )
+
+
 def _extract_json_object(text: str) -> dict[str, Any]:
     stripped = text.strip()
     if stripped.startswith("```"):
@@ -144,6 +283,32 @@ def _normalise_briefing(parsed: dict[str, Any], fallback: dict[str, Any]) -> dic
     return briefing
 
 
+def _normalise_plan(parsed: dict[str, Any]) -> dict[str, Any]:
+    raw_calls = parsed.get("tool_calls")
+    if not isinstance(raw_calls, list):
+        raise BedrockAdapterError("Planner response did not include a tool_calls list.")
+    tool_calls: list[dict[str, Any]] = []
+    for raw_call in raw_calls[:8]:
+        if not isinstance(raw_call, dict):
+            continue
+        name = raw_call.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        arguments = raw_call.get("arguments")
+        tool_calls.append(
+            {
+                "name": name.strip(),
+                "arguments": arguments if isinstance(arguments, dict) else {},
+            }
+        )
+    if not tool_calls:
+        raise BedrockAdapterError("Planner response did not include executable tool calls.")
+    return {
+        "rationale": _text(parsed.get("rationale"), "Planner selected the bounded local review workflow."),
+        "tool_calls": tool_calls,
+    }
+
+
 def _mock_bedrock_briefing(
     fallback: dict[str, Any],
     hazards: list[dict[str, Any]],
@@ -175,13 +340,79 @@ def _mock_bedrock_briefing(
     return briefing
 
 
-def _metadata(config: RuntimeConfig, started: float, mode: str) -> dict[str, Any]:
+def _mock_bedrock_tool_plan(scenario: str) -> dict[str, Any]:
+    if scenario == "invalid-tool":
+        return {
+            "rationale": "Mock planner intentionally requested a disallowed tool for fallback testing.",
+            "tool_calls": [
+                {"name": "run_shell", "arguments": {"command": "curl http://example.com"}},
+                {"name": "resolve_location", "arguments": {}},
+            ],
+        }
+
+    return {
+        "rationale": "Mock planner selected the bounded local 3D-RAMS tool chain.",
+        "tool_calls": [
+            {"name": "resolve_location", "arguments": {}},
+            {"name": "fetch_geospatial_features", "arguments": {}},
+            {"name": "build_scene", "arguments": {}},
+            {"name": "load_planning_fixture", "arguments": {}},
+            {"name": "extract_hazard_notes", "arguments": {}},
+            {"name": "create_annotations", "arguments": {}},
+            {"name": "generate_site_brief", "arguments": {}},
+        ],
+    }
+
+
+def _mock_bedrock_planner_synthesis(
+    fallback: dict[str, Any],
+    hazards: list[dict[str, Any]],
+    planning_available: bool,
+    executed_tools: list[str],
+) -> dict[str, Any]:
+    briefing = dict(fallback)
+    if os.getenv("BEDROCK_MOCK_PLANNER_UNSAFE_RESPONSE", "").strip().lower() in {"1", "true", "yes", "on"}:
+        briefing["headline"] = "Certified RAMS briefing approved for work."
+        briefing["summary"] = [
+            "The LLM planner has certified RAMS for the selected site.",
+            "The pack is approved for work without further human review.",
+            "Emergency guidance can now be used operationally.",
+        ]
+        briefing["priority_checks"] = []
+        briefing["generation_mode"] = "llm-planner-mock"
+        return briefing
+
+    briefing["headline"] = "LLM-planned review pack for human approval."
+    briefing["summary"] = [
+        f"Planner path executed {len(executed_tools)} allowlisted local tools over the current site evidence.",
+        f"The synthesis reviewed {len(hazards)} candidate hazards and kept source confidence visible.",
+        "This remains a controlled review pack, not a certified RAMS or work approval.",
+    ]
+    if not planning_available:
+        briefing["limitations"] = briefing["limitations"] + [
+            "Planner synthesis noted missing planning evidence; document-derived risks remain incomplete."
+        ]
+    briefing["generation_mode"] = "llm-planner-mock"
+    return briefing
+
+
+def _metadata(
+    config: RuntimeConfig,
+    started: float,
+    mode: str,
+    *,
+    phase: str | None = None,
+    model_call_count: int = 1,
+) -> dict[str, Any]:
     return {
         "mode": mode,
+        "phase": phase,
         "modelId": config.bedrock_model_id,
         "awsRegion": config.aws_region,
         "maxTokens": config.bedrock_max_tokens,
         "temperature": config.bedrock_temperature,
+        "modelCallCount": model_call_count,
+        "maxModelCalls": config.bedrock_max_model_calls,
         "latencyMs": round((time.perf_counter() - started) * 1000),
     }
 

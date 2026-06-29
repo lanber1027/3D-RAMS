@@ -34,7 +34,7 @@ class EnvPatch:
 
 class SiteBriefingAgentTests(unittest.TestCase):
     def test_happy_path_returns_scene_annotations_evidence_and_trace(self):
-        result = run_site_briefing({"latitude": 52.2053, "longitude": -1.6022})
+        result = run_site_briefing({"latitude": 52.2053, "longitude": -1.6022, "useBedrock": False})
 
         self.assertEqual(result["scene"]["provider"], "cesium-local-fixture")
         self.assertGreaterEqual(len(result["annotations"]), 5)
@@ -43,12 +43,12 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertTrue(result["safety"]["allowed"])
         self.assertIn("request", result)
         self.assertIn("runtime", result)
-        self.assertEqual(result["runtime"]["briefingMode"], "disabled")
+        self.assertEqual(result["runtime"]["briefingMode"], "deterministic")
         self.assertIsNone(result["request"]["fixturePack"])
         self.assertEqual(result["runtime"]["fixturePackMode"], "synthetic-default")
         self.assertIn("sources", result)
         self.assertIn("runOverview", result["architecture"])
-        self.assertEqual(result["architecture"]["runOverview"]["briefingMode"], "disabled")
+        self.assertEqual(result["architecture"]["runOverview"]["briefingMode"], "deterministic")
 
     def test_missing_planning_fixture_keeps_geospatial_warning(self):
         result = run_site_briefing({"includePlanningFixture": False})
@@ -176,7 +176,7 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertTrue(any("missing" in item.lower() for item in pack["warnings"]))
 
     def test_architecture_visualizer_contract_tracks_sources_trace_and_aws_mapping(self):
-        result = run_site_briefing({"goal": "Pre-visit RAMS scoping pack"})
+        result = run_site_briefing({"goal": "Pre-visit RAMS scoping pack", "useBedrock": False})
         architecture = result["architecture"]
 
         self.assertGreaterEqual(len(architecture["sources"]), 5)
@@ -195,7 +195,7 @@ class SiteBriefingAgentTests(unittest.TestCase):
             AWS_REGION="eu-west-2",
             BEDROCK_MODEL_ID="anthropic.claude-3-7-sonnet-20250219-v1:0",
         ):
-            result = run_site_briefing({"useBedrock": True})
+            result = run_site_briefing({"agentMode": "bedrock-briefing", "useBedrock": True})
 
         self.assertEqual(result["runtime"]["briefingMode"], "mocked")
         self.assertEqual(result["briefing"]["generation_mode"], "bedrock-mock")
@@ -212,7 +212,7 @@ class SiteBriefingAgentTests(unittest.TestCase):
             BEDROCK_MOCK_UNSAFE_RESPONSE="true",
             BEDROCK_MODEL_ID="anthropic.claude-3-7-sonnet-20250219-v1:0",
         ):
-            result = run_site_briefing({"useBedrock": True})
+            result = run_site_briefing({"agentMode": "bedrock-briefing", "useBedrock": True})
 
         self.assertEqual(result["runtime"]["briefingMode"], "mocked")
         self.assertFalse(result["safety"]["allowed"])
@@ -236,7 +236,7 @@ class SiteBriefingAgentTests(unittest.TestCase):
             BEDROCK_MOCK_UNSAFE_RESPONSE=None,
             BEDROCK_MODEL_ID="anthropic.claude-3-7-sonnet-20250219-v1:0",
         ):
-            result = run_site_briefing({"useBedrock": True})
+            result = run_site_briefing({"agentMode": "bedrock-briefing", "useBedrock": True})
 
         self.assertEqual(result["runtime"]["briefingMode"], "fallback")
         self.assertIn("Bedrock briefing failed", result["runtime"]["fallbackReason"])
@@ -244,6 +244,113 @@ class SiteBriefingAgentTests(unittest.TestCase):
         bedrock_step = next(step for step in result["trace"] if step["name"] == "generate_bedrock_briefing")
         self.assertEqual(bedrock_step["status"], "fallback")
         self.assertIn("deterministic briefing used", bedrock_step["fallbackReason"])
+
+    def test_llm_planner_mock_trace_contains_plan_tool_calls_synthesis_and_safety(self):
+        with EnvPatch(
+            ENABLE_BEDROCK="true",
+            BEDROCK_MOCK_RESPONSE="true",
+            BEDROCK_MOCK_PLANNER_SCENARIO=None,
+            BEDROCK_MOCK_PLANNER_UNSAFE_RESPONSE=None,
+            BEDROCK_SIMULATE_FAILURE=None,
+            BEDROCK_MODEL_ID="anthropic.claude-3-7-sonnet-20250219-v1:0",
+        ):
+            result = run_site_briefing({"agentMode": "llm-planner", "useBedrock": True})
+
+        self.assertEqual(result["request"]["agentMode"], "llm-planner")
+        self.assertEqual(result["runtime"]["activeAgentMode"], "llm-planner")
+        self.assertEqual(result["runtime"]["briefingMode"], "mocked")
+        self.assertEqual(result["runtime"]["modelCallCount"], 2)
+        self.assertLessEqual(result["runtime"]["modelCallCount"], result["runtime"]["maxModelCalls"])
+        self.assertEqual(result["briefing"]["generation_mode"], "llm-planner-mock")
+        self.assertTrue(result["safety"]["allowed"])
+
+        trace_names = [step["name"] for step in result["trace"]]
+        self.assertIn("llm_planner_model_plan", trace_names)
+        self.assertIn("llm_planner_tool_call", trace_names)
+        self.assertIn("llm_planner_synthesis", trace_names)
+        self.assertEqual(result["trace"][-1]["name"], "safety_gate")
+        self.assertEqual(result["trace"][-1]["status"], "ok")
+
+        allowed_tools = {schema["name"] for schema in result["runtime"]["plannerToolSchemas"]}
+        plan_step = next(step for step in result["trace"] if step["name"] == "llm_planner_model_plan")
+        planned_tools = {call["name"] for call in plan_step["output"]["toolCalls"]}
+        self.assertTrue(planned_tools)
+        self.assertTrue(planned_tools.issubset(allowed_tools))
+
+        tool_steps = [step for step in result["trace"] if step["name"] == "llm_planner_tool_call"]
+        self.assertGreaterEqual(len(tool_steps), 7)
+        self.assertTrue(all(step["output"]["allowlisted"] for step in tool_steps))
+
+    def test_llm_planner_rejects_invalid_model_tool_and_falls_back(self):
+        with EnvPatch(
+            ENABLE_BEDROCK="true",
+            BEDROCK_MOCK_RESPONSE="true",
+            BEDROCK_MOCK_PLANNER_SCENARIO="invalid-tool",
+            BEDROCK_MOCK_PLANNER_UNSAFE_RESPONSE=None,
+            BEDROCK_SIMULATE_FAILURE=None,
+        ):
+            result = run_site_briefing({"agentMode": "llm-planner", "useBedrock": True})
+
+        self.assertEqual(result["runtime"]["briefingMode"], "fallback")
+        self.assertEqual(result["runtime"]["activeAgentMode"], "deterministic-fallback")
+        self.assertEqual(result["runtime"]["modelCallCount"], 1)
+        self.assertIn("disallowed tool", result["runtime"]["fallbackReason"])
+        self.assertNotEqual(result["briefing"].get("generation_mode"), "llm-planner-mock")
+        self.assertTrue(result["safety"]["allowed"])
+
+        fallback_steps = [
+            step
+            for step in result["trace"]
+            if step["name"] == "llm_planner_model_plan" and step["status"] == "fallback"
+        ]
+        self.assertTrue(fallback_steps)
+        self.assertEqual(fallback_steps[-1]["output"]["rejectedTool"], "run_shell")
+        self.assertIn("PlannerExecutionError", fallback_steps[-1]["output"]["errorType"])
+
+    def test_llm_planner_simulated_failure_falls_back_with_visible_reason(self):
+        with EnvPatch(
+            ENABLE_BEDROCK="true",
+            BEDROCK_MOCK_RESPONSE="true",
+            BEDROCK_MOCK_PLANNER_SCENARIO=None,
+            BEDROCK_MOCK_PLANNER_UNSAFE_RESPONSE=None,
+            BEDROCK_SIMULATE_FAILURE="true",
+        ):
+            result = run_site_briefing({"agentMode": "llm-planner", "useBedrock": True})
+
+        self.assertEqual(result["runtime"]["briefingMode"], "fallback")
+        self.assertEqual(result["runtime"]["activeAgentMode"], "deterministic-fallback")
+        self.assertIn("Simulated Bedrock failure", result["runtime"]["fallbackReason"])
+        fallback_step = next(
+            step
+            for step in result["trace"]
+            if step["name"] == "llm_planner_model_plan" and step["status"] == "fallback"
+        )
+        self.assertIn("BedrockAdapterError", fallback_step["output"]["errorType"])
+        self.assertTrue(result["safety"]["allowed"])
+
+    def test_unsafe_llm_planner_mock_synthesis_is_blocked_after_generation(self):
+        with EnvPatch(
+            ENABLE_BEDROCK="true",
+            BEDROCK_MOCK_RESPONSE="true",
+            BEDROCK_MOCK_PLANNER_SCENARIO=None,
+            BEDROCK_MOCK_PLANNER_UNSAFE_RESPONSE="true",
+            BEDROCK_SIMULATE_FAILURE=None,
+        ):
+            result = run_site_briefing({"agentMode": "llm-planner", "useBedrock": True})
+
+        self.assertEqual(result["runtime"]["briefingMode"], "mocked")
+        self.assertEqual(result["runtime"]["activeAgentMode"], "llm-planner")
+        self.assertFalse(result["safety"]["allowed"])
+        self.assertEqual(result["annotations"], [])
+        self.assertIn("certified rams", result["safety"]["triggeredRules"])
+        self.assertIn("approved for work", result["safety"]["triggeredRules"])
+        self.assertIn("generatedBriefing", result["safety"]["triggeredSources"])
+
+        synth_step = next(step for step in result["trace"] if step["name"] == "llm_planner_synthesis")
+        safety_step = next(step for step in result["trace"] if step["name"] == "safety_gate")
+        self.assertEqual(synth_step["status"], "ok")
+        self.assertEqual(safety_step["status"], "blocked")
+        self.assertEqual(result["briefing"]["headline"], "Request blocked by safety gate.")
 
 
 if __name__ == "__main__":

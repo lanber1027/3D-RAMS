@@ -14,8 +14,87 @@ const DEFAULT_REQUEST = {
   includePlanningFixture: true,
   simulateMapFailure: false,
   useBedrock: true,
+  agentMode: "llm-planner",
   additionalRequest: "",
 };
+
+function toList(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function summarizePlanText(run) {
+  const explicitPlan =
+    run?.llmPlan?.summary ||
+    run?.llmPlan?.text ||
+    run?.llmPlan?.plan ||
+    run?.architecture?.llmFlow?.planSummary;
+
+  if (explicitPlan) return explicitPlan;
+
+  const modelStep = toList(run?.trace).find((step) => step.type === "model" || step.output?.modelId);
+  return modelStep?.summary || "Planner detail not returned in this run.";
+}
+
+function deriveModelCalls(run) {
+  if (Array.isArray(run?.modelCalls) && run.modelCalls.length) return run.modelCalls;
+
+  return toList(run?.trace)
+    .filter((step) => step.type === "model" || step.output?.modelId)
+    .map((step, index) => ({
+      id: step.id || `model-${index}`,
+      modelId: step.output?.modelId || run?.runtime?.modelId || "model not reported",
+      status: step.status || "unknown",
+      latencyMs: step.output?.latencyMs,
+      summary: step.summary,
+      tokenUsage: step.output?.tokenUsage || run?.tokenUsage,
+    }));
+}
+
+function deriveToolCalls(run) {
+  if (Array.isArray(run?.llmToolCalls) && run.llmToolCalls.length) return run.llmToolCalls;
+
+  return toList(run?.trace)
+    .filter((step) => step.type !== "model")
+    .map((step, index) => ({
+      id: step.id || `tool-${index}`,
+      name: step.name || `Tool ${index + 1}`,
+      status: step.status || "unknown",
+      summary: step.summary,
+      allowlisted: step.allowlisted ?? true,
+      evidenceIds: toList(step.evidenceIds),
+      sourceIds: toList(step.sourceIds),
+      fallbackReason: step.fallbackReason,
+    }));
+}
+
+function deriveFallback(run) {
+  return (
+    run?.fallback ||
+    run?.runtime?.fallback ||
+    run?.architecture?.llmFlow?.fallback ||
+    toList(run?.trace).find((step) => step.status === "fallback" || step.fallbackReason) || {
+      status: run?.runtime?.briefingMode === "fallback" ? "fallback" : "available",
+      reason: "Deterministic fallback remains available when the model step is disabled, rejected, or fails.",
+    }
+  );
+}
+
+function deriveRuntimeState(run) {
+  const runtime = run?.runtime || {};
+  const briefingMode = runtime.briefingMode || "not reported";
+  const agentMode =
+    runtime.agentMode ||
+    run?.agentMode ||
+    (briefingMode === "real" ? "llm-first" : briefingMode === "fallback" ? "fallback" : "deterministic");
+
+  return {
+    briefingMode,
+    agentMode,
+    modelId: runtime.modelId || "No live model reported",
+    plannerMode: run?.llmPlan ? "model-planned" : briefingMode === "real" ? "llm-assisted" : "deterministic-only",
+    tokenUsage: run?.tokenUsage || runtime.tokenUsage || null,
+  };
+}
 
 function SceneViewer({ run }) {
   const containerRef = useRef(null);
@@ -178,10 +257,160 @@ function SceneViewer({ run }) {
   );
 }
 
+function LlmFlowVisualizer({ run }) {
+  if (!run) return null;
+
+  const runtimeState = deriveRuntimeState(run);
+  const modelCalls = deriveModelCalls(run);
+  const toolCalls = deriveToolCalls(run);
+  const fallback = deriveFallback(run);
+  const evidenceCount = toList(run.evidence).length;
+  const safetyAllowed = Boolean(run.safety?.allowed);
+  const planText = summarizePlanText(run);
+  const plannerBadgeTone = runtimeState.agentMode === "llm-first" || runtimeState.briefingMode === "real" ? "real" : "future";
+  const tokenSummary = runtimeState.tokenUsage
+    ? [
+        runtimeState.tokenUsage.inputTokens ?? runtimeState.tokenUsage.input ?? null,
+        runtimeState.tokenUsage.outputTokens ?? runtimeState.tokenUsage.output ?? null,
+        runtimeState.tokenUsage.totalTokens ?? runtimeState.tokenUsage.total ?? null,
+      ]
+        .filter((value) => value !== null && value !== undefined)
+        .join(" / ")
+    : "";
+
+  const stages = [
+    {
+      title: "Model Plan",
+      status: plannerBadgeTone,
+      body: planText,
+      meta: `Mode: ${runtimeState.agentMode} | ${runtimeState.plannerMode}`,
+    },
+    {
+      title: "Allowlisted Tool Calls",
+      status: toolCalls.some((item) => item.status === "fallback") ? "fallback" : "ok",
+      body:
+        toolCalls.length > 0
+          ? `${toolCalls.length} tool step${toolCalls.length === 1 ? "" : "s"} returned to the planner/runtime.`
+          : "No tool-call detail returned in this run.",
+      meta: toolCalls.length > 0 ? toolCalls.map((item) => item.name).slice(0, 4).join(", ") : "Deterministic internal steps only",
+    },
+    {
+      title: "Evidence + Results",
+      status: evidenceCount > 0 ? "ok" : "warning",
+      body: `${evidenceCount} evidence item${evidenceCount === 1 ? "" : "s"} linked into the briefing and annotations.`,
+      meta: toList(run.sources).length > 0 ? `${toList(run.sources).length} source register entries` : "Source register detail not returned",
+    },
+    {
+      title: "Synthesis",
+      status: run.briefing ? "ok" : "warning",
+      body: run.briefing?.headline || "Briefing payload not returned.",
+      meta: modelCalls[0]?.modelId || runtimeState.modelId,
+    },
+    {
+      title: "Safety Gate",
+      status: safetyAllowed ? "ok" : "blocked",
+      body: run.safety?.message || run.safety?.level || "Safety result not returned.",
+      meta: safetyAllowed ? "Human review still required" : "Unsafe claim blocked",
+    },
+    {
+      title: "Deterministic Fallback",
+      status: fallback.status || "future",
+      body: fallback.reason || fallback.summary || "Fallback detail not returned.",
+      meta: fallback.trigger || fallback.fallbackReason || "Available when model path is disabled or fails",
+    },
+  ];
+
+  return (
+    <section className="panel llm-panel">
+      <div className="panel-heading">
+        <GitBranch size={18} />
+        <h2>LLM-First Runtime</h2>
+      </div>
+
+      <div className="llm-runtime-strip">
+        <article>
+          <span>Runtime mode</span>
+          <strong>{runtimeState.agentMode}</strong>
+          <small>{runtimeState.briefingMode} briefing mode</small>
+        </article>
+        <article>
+          <span>Planner</span>
+          <strong>{runtimeState.plannerMode}</strong>
+          <small>{runtimeState.modelId}</small>
+        </article>
+        <article>
+          <span>Model calls</span>
+          <strong>{modelCalls.length}</strong>
+          <small>{tokenSummary || "Token usage not reported"}</small>
+        </article>
+        <article>
+          <span>Fallback</span>
+          <strong>{fallback.status || "available"}</strong>
+          <small>deterministic path remains public-safe</small>
+        </article>
+      </div>
+
+      <div className="llm-stage-grid">
+        {stages.map((stage) => (
+          <article key={stage.title} className="llm-stage-card">
+            <div className="llm-stage-top">
+              <h3>{stage.title}</h3>
+              <em className={`status ${stage.status}`}>{stage.status}</em>
+            </div>
+            <p>{stage.body}</p>
+            <small>{stage.meta}</small>
+          </article>
+        ))}
+      </div>
+
+      <div className="llm-detail-grid">
+        <article>
+          <h3>Planner + Model Trace</h3>
+          <div className="llm-detail-list">
+            {modelCalls.length > 0 ? (
+              modelCalls.map((call) => (
+                <div key={call.id} className="llm-detail-row">
+                  <strong>{call.modelId}</strong>
+                  <em className={`status ${call.status}`}>{call.status}</em>
+                  <small>{call.summary || "Model call returned no summary."}</small>
+                </div>
+              ))
+            ) : (
+              <div className="llm-detail-row">
+                <strong>Deterministic only</strong>
+                <small>No model call metadata returned for this run.</small>
+              </div>
+            )}
+          </div>
+        </article>
+        <article>
+          <h3>Allowlisted Tool Results</h3>
+          <div className="llm-detail-list">
+            {toolCalls.map((call) => (
+              <div key={call.id} className="llm-detail-row">
+                <strong>{call.name}</strong>
+                <em className={`status ${call.status}`}>{call.status}</em>
+                <small>
+                  {call.summary || "No summary returned."}
+                  {call.allowlisted === false ? " Not allowlisted." : " Allowlisted."}
+                </small>
+              </div>
+            ))}
+          </div>
+        </article>
+      </div>
+    </section>
+  );
+}
+
 function WorkflowVisualizer({ architecture }) {
   if (!architecture) return null;
-  const overview = architecture.runOverview;
-  const sourceById = Object.fromEntries((architecture.sources || []).map((source) => [source.id, source]));
+  const overview = architecture.runOverview || {};
+  const sources = toList(architecture.sources);
+  const currentTrace = toList(architecture.currentTrace);
+  const evidenceFlow = toList(architecture.evidenceFlow);
+  const awsPath = toList(architecture.awsPath);
+  const sourceById = Object.fromEntries(sources.map((source) => [source.id, source]));
 
   return (
     <section className="panel visualizer">
@@ -193,29 +422,29 @@ function WorkflowVisualizer({ architecture }) {
       <div className="run-overview">
         <div>
           <span>Query</span>
-          <strong>{overview.goal}</strong>
-          <small>{overview.siteName}</small>
+          <strong>{overview.goal || "Goal not returned"}</strong>
+          <small>{overview.siteName || "Site not returned"}</small>
         </div>
         <div>
           <span>Coordinate</span>
-          <strong>{overview.coordinate}</strong>
-          <small>{overview.fixturePack}, {overview.planningFixture} planning, {overview.mapMode} map</small>
+          <strong>{overview.coordinate || "Coordinate not returned"}</strong>
+          <small>{overview.fixturePack || "fixture unknown"}, {overview.planningFixture || "planning unknown"} planning, {overview.mapMode || "map unknown"} map</small>
         </div>
         <div>
           <span>Safety</span>
-          <strong>{overview.safetyLevel}</strong>
+          <strong>{overview.safetyLevel || "not returned"}</strong>
           <small>human review required before use</small>
         </div>
         <div>
           <span>Briefing Mode</span>
-          <strong>{overview.briefingMode}</strong>
+          <strong>{overview.briefingMode || "not returned"}</strong>
           <small>{architecture.runtime?.modelId || "deterministic fallback available"}</small>
         </div>
       </div>
 
       <h3 className="visualizer-label">Tool Timeline</h3>
       <div className="tool-timeline">
-        {architecture.currentTrace.map((step, index) => (
+        {currentTrace.map((step, index) => (
           <article className="tool-card" key={step.id || `${step.name}-${index}`}>
             <div>
               <span>{String(index + 1).padStart(2, "0")}</span>
@@ -224,9 +453,9 @@ function WorkflowVisualizer({ architecture }) {
             </div>
             <p>{step.summary}</p>
             <small>
-              Sources: {step.sourceIds.map((id) => sourceById[id]?.label || id).join(", ") || "internal"}
+              Sources: {toList(step.sourceIds).map((id) => sourceById[id]?.label || id).join(", ") || "internal"}
             </small>
-            <small>Evidence: {step.evidenceIds.join(", ") || "none"}</small>
+            <small>Evidence: {toList(step.evidenceIds).join(", ") || "none"}</small>
             {step.fallbackReason && <small className="warning-note">{step.fallbackReason}</small>}
             {step.output?.modelId && <small>Model: {step.output.modelId}</small>}
             {step.output?.latencyMs !== undefined && <small>Latency: {step.output.latencyMs} ms</small>}
@@ -236,7 +465,7 @@ function WorkflowVisualizer({ architecture }) {
 
       <h3 className="visualizer-label">Source + Evidence Map</h3>
       <div className="source-grid">
-        {architecture.sources.map((source) => (
+        {sources.map((source) => (
           <article key={source.id}>
             <div>
               <strong>{source.label}</strong>
@@ -249,11 +478,11 @@ function WorkflowVisualizer({ architecture }) {
         ))}
       </div>
       <div className="evidence-flow">
-        {architecture.evidenceFlow.map((item) => (
+        {evidenceFlow.map((item) => (
           <article key={item.id}>
             <strong>{item.title}</strong>
             <em className={`status ${item.status}`}>{item.status}</em>
-            <small>Feeds: {item.feeds.join(", ")}</small>
+            <small>Feeds: {toList(item.feeds).join(", ")}</small>
           </article>
         ))}
       </div>
@@ -261,17 +490,17 @@ function WorkflowVisualizer({ architecture }) {
       <div className="decision-grid">
         <article>
           <h3>Safety Gate</h3>
-          <strong>{architecture.safetyGate.level}</strong>
-          <p>{architecture.safetyGate.message}</p>
+          <strong>{architecture.safetyGate?.level || "not returned"}</strong>
+          <p>{architecture.safetyGate?.message || "Safety gate detail not returned."}</p>
           <small>
-            Rules: {architecture.safetyGate.triggeredRules.length ? architecture.safetyGate.triggeredRules.join(", ") : "none triggered"}
+            Rules: {toList(architecture.safetyGate?.triggeredRules).length ? toList(architecture.safetyGate?.triggeredRules).join(", ") : "none triggered"}
           </small>
-          <small>{architecture.safetyGate.awsMapping}</small>
+          <small>{architecture.safetyGate?.awsMapping || "Local rules today, Guardrails/human review later"}</small>
         </article>
         <article>
           <h3>Future AWS Mapping</h3>
           <ul>
-            {architecture.awsPath.map((item) => (
+            {awsPath.map((item) => (
               <li key={item.local}>
                 <strong>{item.local}</strong>
                 <span>{item.future}</span>
@@ -297,10 +526,12 @@ function App() {
 
   const runtimeTone = useMemo(() => {
     if (!run) return "pending";
-    if (run.runtime.briefingMode === "real") return "allowed";
-    if (run.runtime.briefingMode === "fallback") return "warning";
+    if (run.runtime?.briefingMode === "real") return "allowed";
+    if (run.runtime?.briefingMode === "fallback") return "warning";
     return "pending";
   }, [run]);
+
+  const runtimeState = useMemo(() => deriveRuntimeState(run), [run]);
 
   async function runAgent(nextRequest = request) {
     setLoading(true);
@@ -334,6 +565,9 @@ function App() {
         <div>
           <p className="eyebrow">3D-RAMS Demo1</p>
           <h1>Pre-Visit Field Briefing Agent</h1>
+          <p className="topbar-summary">
+            LLM-first when live Bedrock is enabled, deterministic fallback when it is not.
+          </p>
         </div>
         <div className="status-stack">
           <div className={`safety-pill ${safetyTone}`}>
@@ -342,7 +576,7 @@ function App() {
           </div>
           <div className={`safety-pill ${runtimeTone}`}>
             <GitBranch size={16} />
-            {run ? run.runtime.briefingMode : "not run"}
+            {run ? runtimeState.briefingMode : "not run"}
           </div>
         </div>
       </header>
@@ -393,11 +627,23 @@ function App() {
         <label className="checkbox-label">
           <input
             type="checkbox"
-            checked={request.useBedrock}
-            onChange={(event) => updateRequest("useBedrock", event.target.checked)}
+          checked={request.useBedrock}
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              setRequest((current) => ({
+                ...current,
+                useBedrock: enabled,
+                agentMode: enabled ? "llm-planner" : "deterministic",
+              }));
+            }}
           />
-          Bedrock
+          Live Bedrock
         </label>
+        <div className="mode-callout">
+          <span>Runtime mode</span>
+          <strong>{request.useBedrock ? "LLM-first if backend allows it" : "Deterministic only"}</strong>
+          <small>Live Bedrock remains maintainer-only and falls back locally if unavailable.</small>
+        </div>
         <button onClick={() => runAgent()} disabled={loading}>
           <Play size={16} />
           {loading ? "Running" : "Run"}
@@ -430,6 +676,8 @@ function App() {
 
       {error && <div className="error-banner">Backend unavailable: {error}</div>}
 
+      {run && <LlmFlowVisualizer run={run} />}
+
       <section className="main-grid">
         <div className="scene-panel panel">
           {run ? <SceneViewer run={run} /> : <div className="empty-state">Waiting for agent run</div>}
@@ -444,19 +692,19 @@ function App() {
             <>
               <h3>{run.briefing.headline}</h3>
               <ul>
-                {run.briefing.summary.map((item) => (
+                {toList(run.briefing.summary).map((item) => (
                   <li key={item}>{item}</li>
                 ))}
               </ul>
               <h4>Priority Checks</h4>
               <ul>
-                {run.briefing.priority_checks.map((item) => (
+                {toList(run.briefing.priority_checks).map((item) => (
                   <li key={item}>{item}</li>
                 ))}
               </ul>
               <h4>Limitations</h4>
               <ul>
-                {run.briefing.limitations.map((item) => (
+                {toList(run.briefing.limitations).map((item) => (
                   <li key={item}>{item}</li>
                 ))}
               </ul>
@@ -472,7 +720,7 @@ function App() {
               <h2>Evidence Register</h2>
             </div>
             <div className="evidence-list">
-              {run.evidence.map((item) => (
+              {toList(run.evidence).map((item) => (
                 <article key={item.id}>
                   <strong>{item.title}</strong>
                   <span>{item.source}</span>
@@ -487,7 +735,7 @@ function App() {
               <h2>Agent Trace</h2>
             </div>
             <div className="trace-table">
-              {run.trace.map((step, index) => (
+              {toList(run.trace).map((step, index) => (
                 <div className="trace-row" key={`${step.name}-${index}`}>
                   <span>{String(index + 1).padStart(2, "0")}</span>
                   <strong>{step.name}</strong>

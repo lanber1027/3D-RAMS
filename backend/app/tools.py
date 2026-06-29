@@ -17,6 +17,9 @@ AWS_TRACE_MAPPING = {
     "create_annotations": "CloudWatch span: tool.create_annotations",
     "generate_site_brief": "Bedrock/CloudWatch span: tool.generate_site_brief",
     "generate_bedrock_briefing": "Bedrock/CloudWatch span: tool.generate_bedrock_briefing",
+    "llm_planner_model_plan": "Bedrock/CloudWatch span: planner.model_plan",
+    "llm_planner_tool_call": "CloudWatch span: planner.tool_call",
+    "llm_planner_synthesis": "Bedrock/CloudWatch span: planner.synthesis",
     "safety_gate": "Guardrails/CloudWatch span: tool.safety_gate",
 }
 
@@ -56,6 +59,13 @@ def trace_step(
 
 def normalize_request(request: dict[str, Any]) -> dict[str, Any]:
     fixture_pack = request.get("fixturePack") or request.get("fixture_pack")
+    use_bedrock = bool(request.get("useBedrock", True))
+    raw_agent_mode = request.get("agentMode") or request.get("agent_mode")
+    agent_mode = str(raw_agent_mode).strip().lower() if raw_agent_mode else (
+        "llm-planner" if use_bedrock else "deterministic"
+    )
+    if agent_mode not in {"deterministic", "bedrock-briefing", "llm-planner"}:
+        agent_mode = "deterministic"
     return {
         "siteName": request.get("siteName") or "Demo rural field fixture",
         "latitude": float(request.get("latitude", 52.2053)),
@@ -63,7 +73,8 @@ def normalize_request(request: dict[str, Any]) -> dict[str, Any]:
         "goal": request.get("goal") or "Pre-visit RAMS scoping pack",
         "includePlanningFixture": bool(request.get("includePlanningFixture", True)),
         "simulateMapFailure": bool(request.get("simulateMapFailure")),
-        "useBedrock": bool(request.get("useBedrock", True)),
+        "useBedrock": use_bedrock,
+        "agentMode": agent_mode,
         "fixturePack": str(fixture_pack).strip().lower() if fixture_pack else None,
         "additionalRequest": request.get("additionalRequest") or "",
     }
@@ -139,7 +150,7 @@ def source_register(
         },
         {
             "id": "bedrock-briefing",
-            "label": "Amazon Bedrock briefing adapter",
+            "label": "Amazon Bedrock planner and synthesis adapter",
             "kind": "llm_adapter",
             "status": bedrock_status,
             "origin": (
@@ -148,7 +159,7 @@ def source_register(
                 else "Disabled unless ENABLE_BEDROCK=true and request uses Bedrock"
             ),
             "trustBoundary": "AWS account boundary when enabled",
-            "awsMapping": "Amazon Bedrock InvokeModel for one briefing step per run",
+            "awsMapping": "Amazon Bedrock InvokeModel for bounded planner and synthesis steps",
         },
         ]
     )
@@ -827,8 +838,8 @@ def architecture_snapshot(
             "awsMapping": "Future Bedrock Guardrails plus human approval queue",
         },
         "awsPath": [
-            {"local": "Deterministic Python agent loop", "future": "Bedrock model/tool planning"},
-            {"local": "One Bedrock briefing step", "future": "Evaluated model-assisted extraction and generation"},
+            {"local": "Deterministic Python tool layer", "future": "Bedrock planner plus allowlisted tool execution"},
+            {"local": "Optional Bedrock planner/synthesis", "future": "Evaluated model-assisted extraction and generation"},
             {"local": "JSON trace in API response", "future": "CloudWatch logs, metrics, traces"},
             {"local": "Evidence list in response", "future": "S3 evidence pack"},
             {"local": "Per-request in-memory run", "future": "DynamoDB run/session record"},
@@ -844,7 +855,7 @@ def architecture_snapshot(
                     else "synthetic default fixtures"
                 ),
             },
-            {"component": "Bedrock briefing", "status": str(runtime["briefingMode"])},
+            {"component": "Bedrock planner/synthesis", "status": str(runtime["briefingMode"])},
             {"component": "3D viewer", "status": "real local Cesium scene"},
             {
                 "component": "Planning documents",

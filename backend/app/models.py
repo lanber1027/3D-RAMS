@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
@@ -52,6 +52,11 @@ class SiteBriefRequest(BaseModel):
     useBedrock: bool = Field(
         default=True,
         description="Whether the run requests the optional Bedrock briefing path. Environment config still controls whether Bedrock is actually used.",
+    )
+    agentMode: Literal["deterministic", "bedrock-briefing", "llm-planner"] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("agentMode", "agent_mode"),
+        description="Agent execution mode: deterministic, bedrock-briefing, or llm-planner.",
     )
     additionalRequest: str | None = Field(
         default=None,
