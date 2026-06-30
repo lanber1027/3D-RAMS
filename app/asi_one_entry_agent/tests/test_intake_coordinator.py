@@ -64,6 +64,23 @@ class IntakeCoordinatorTests(unittest.TestCase):
         self.assertEqual(confirmed["caseId"], result["caseId"])
         self.assertTrue(confirmed["confirmedByUser"])
 
+    def test_confirmed_payload_preserves_report_access(self):
+        payload = {
+            "message": "I want to visit 8 Albert Embankment tomorrow for a survey for 2km",
+            "conversationId": "proxy-session-id",
+            "confirmedByUser": True,
+            "reportAccess": {
+                "mode": "asi_session",
+                "sessionId": "asi-launch-session",
+                "authorizedCaseIds": ["case_expected"],
+            },
+        }
+
+        result = coordinate_intake(payload)
+        confirmed = build_confirmed_entry_payload(build_entry_turn(payload), result)
+
+        self.assertEqual(confirmed["reportAccess"]["sessionId"], "asi-launch-session")
+
     def test_invalid_model_json_is_rejected(self):
         with self.assertRaisesRegex(IntakeValidationError, "valid JSON"):
             coordinate_intake({"message": "8 Albert Embankment for 2km"}, model_json=lambda _: "not json")
