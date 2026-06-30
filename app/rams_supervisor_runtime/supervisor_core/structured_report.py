@@ -100,6 +100,9 @@ def _build_site(location: dict[str, Any]) -> ReportSite:
 def _build_runtime(runtime: dict[str, Any]) -> ReportRuntime:
     return ReportRuntime(
         briefingMode=str(runtime.get("briefingMode") or "unknown"),
+        bedrockRequested=bool(runtime.get("bedrockRequested")),
+        bedrockEnabled=bool(runtime.get("bedrockEnabled")),
+        bedrockUsed=bool(runtime.get("bedrockUsed")),
         fixturePack=runtime.get("fixturePack"),
         fixturePackMode=str(runtime.get("fixturePackMode") or "unknown"),
         liveApiCalls=bool(runtime.get("liveApiCalls")),

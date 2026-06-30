@@ -108,6 +108,9 @@ class ReportSite(BaseModel):
 
 class ReportRuntime(BaseModel):
     briefingMode: str
+    bedrockRequested: bool = False
+    bedrockEnabled: bool = False
+    bedrockUsed: bool = False
     fixturePack: str | None = None
     fixturePackMode: str
     liveApiCalls: bool

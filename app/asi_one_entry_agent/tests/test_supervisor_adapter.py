@@ -258,8 +258,26 @@ class AgentVerseAdapterTests(unittest.TestCase):
         self.assertEqual(second["output"]["structuredReport"]["caseId"], second["output"]["caseId"])
 
     def test_entry_cloud_handoff_requires_supervisor_runtime_arn(self):
-        with self.assertRaisesRegex(AdapterValidationError, "RAMS_SUPERVISOR_RUNTIME_ARN"):
-            handle_invocation(confirmed_entry_payload(), supervisor_runtime_arn="", invoke_runtime=lambda **_: {})
+        response = handle_invocation(confirmed_entry_payload(), supervisor_runtime_arn="", invoke_runtime=lambda **_: {})
+
+        output = response["output"]
+        self.assertEqual(output["reportStatus"], "blocked")
+        self.assertEqual(output["entryAgent"]["status"], "blocked")
+        self.assertIn("RAMS_SUPERVISOR_RUNTIME_ARN", output["runtime"]["fallbackReason"])
+
+    def test_entry_invalid_model_output_returns_structured_fallback_response(self):
+        response = handle_invocation(
+            {"entryTurn": True, "message": "8 Albert Embankment for 2km", "conversationId": "bad-model"},
+            supervisor_runtime_arn="arn:aws:bedrock-agentcore:eu-west-2:123456789012:runtime/supervisor-test",
+            invoke_runtime=lambda **_: self.fail("supervisor should not be invoked"),
+            model_json=lambda _: "not json",
+        )
+
+        output = response["output"]
+        self.assertEqual(output["reportStatus"], "entry_pending")
+        self.assertEqual(output["entryAgent"]["mode"], "deterministic-fallback-intake")
+        self.assertEqual(output["entryAgent"]["status"], "clarification_required")
+        self.assertEqual(output["entryAgent"]["fallbackReason"], "invalid_model_json")
 
     def test_entry_report_lookup_forwards_to_supervisor_runtime(self):
         calls: list[dict] = []

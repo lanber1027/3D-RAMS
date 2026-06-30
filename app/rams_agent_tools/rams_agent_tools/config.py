@@ -62,6 +62,7 @@ class RuntimeConfig:
             "briefingMode": status,
             "bedrockRequested": self.bedrock_requested,
             "bedrockEnabled": self.bedrock_enabled,
+            "bedrockUsed": status in {"real", "mocked"},
             "awsRegion": self.aws_region,
             "modelId": self.bedrock_model_id if self.bedrock_enabled else None,
             "maxTokens": self.bedrock_max_tokens if self.bedrock_enabled else None,

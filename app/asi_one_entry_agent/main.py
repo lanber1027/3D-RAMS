@@ -10,6 +10,7 @@ from intake_coordinator import (
     build_confirmed_entry_payload,
     build_entry_turn,
     coordinate_intake,
+    IntakeValidationError,
 )
 from llm_intake import deterministic_fallback_enabled, select_model_json
 from supervisor_adapter import (
@@ -112,82 +113,116 @@ def handle_invocation(
     model_json=None,
 ) -> dict[str, Any]:
     payload = _coerce_entry_payload(payload or {})
-    if _is_report_lookup_payload(payload):
-        return _handle_report_lookup(payload, supervisor_runtime_arn=supervisor_runtime_arn, invoke_runtime=invoke_runtime)
+    try:
+        if _is_report_lookup_payload(payload):
+            return _handle_report_lookup(payload, supervisor_runtime_arn=supervisor_runtime_arn, invoke_runtime=invoke_runtime)
 
-    if not _is_entry_turn_payload(payload):
-        raise AdapterValidationError("Entry payload must include message, prompt, messages, or intake.")
+        if not _is_entry_turn_payload(payload):
+            raise AdapterValidationError("Entry payload must include message, prompt, messages, or intake.")
 
-    turn = build_entry_turn(payload)
-    if payload.get("confirmedByUser") is True and "intake" not in payload and turn["conversationId"] in _PENDING_INTAKES:
-        payload = {**payload, "intake": _PENDING_INTAKES[turn["conversationId"]]}
-    selected_model_json = select_model_json(payload, model_json)
-    intake_result = coordinate_intake(
-        payload,
-        model_json=selected_model_json,
-        fallback_to_deterministic=selected_model_json is not None and deterministic_fallback_enabled(),
-    )
-    conversation_id = turn["conversationId"]
-    user_id = str(payload.get("userId") or "3d-rams-entry-agent")
+        turn = build_entry_turn(payload)
+        if payload.get("confirmedByUser") is True and "intake" not in payload and turn["conversationId"] in _PENDING_INTAKES:
+            payload = {**payload, "intake": _PENDING_INTAKES[turn["conversationId"]]}
+        selected_model_json = select_model_json(payload, model_json)
+        intake_result = coordinate_intake(
+            payload,
+            model_json=selected_model_json,
+            fallback_to_deterministic=selected_model_json is not None and deterministic_fallback_enabled(),
+        )
+        conversation_id = turn["conversationId"]
+        user_id = str(payload.get("userId") or "3d-rams-entry-agent")
 
-    if intake_result["status"] != "launch_ready":
-        if intake_result["status"] == "confirmation_required" and isinstance(intake_result.get("intake"), dict):
-            _PENDING_INTAKES[conversation_id] = intake_result["intake"]
+        if intake_result["status"] != "launch_ready":
+            if intake_result["status"] == "confirmation_required" and isinstance(intake_result.get("intake"), dict):
+                _PENDING_INTAKES[conversation_id] = intake_result["intake"]
+            return {
+                "output": {
+                    "caseId": intake_result.get("caseId"),
+                    "delivery": None,
+                    "run": None,
+                    "structuredReport": None,
+                    "reportStatus": "entry_pending",
+                    "workflowMode": "entry_intake",
+                    "assistantMessage": intake_result["assistantMessage"],
+                    "entryAgent": {
+                        "mode": _entry_agent_mode(intake_result),
+                        "adapterVersion": "asi-one-entry-agent-v2",
+                        "conversationId": conversation_id,
+                        **intake_result,
+                    },
+                }
+            }
+
+        confirmed_payload = build_confirmed_entry_payload(turn, intake_result)
+        _PENDING_INTAKES.pop(conversation_id, None)
+
+        runtime_arn = supervisor_runtime_arn or os.getenv("RAMS_SUPERVISOR_RUNTIME_ARN")
+        if not runtime_arn:
+            raise AdapterValidationError("RAMS_SUPERVISOR_RUNTIME_ARN is required for cloud supervisor handoff.")
+
+        invocation = build_agentcore_invocation(confirmed_payload)
+        agentcore_response = invoke_runtime(
+            runtime_arn=runtime_arn,
+            payload=invocation,
+            session_id=_agentcore_session_id(conversation_id),
+            user_id=user_id,
+        )
+        delivery = build_delivery_payload(agentcore_response, entry_payload=confirmed_payload)
+        assistant_message = _delivery_assistant_message(delivery)
+        output = agentcore_response.get("output") if isinstance(agentcore_response.get("output"), dict) else {}
         return {
             "output": {
-                "caseId": intake_result.get("caseId"),
-                "delivery": None,
-                "run": None,
-                "structuredReport": None,
-                "reportStatus": "entry_pending",
-                "workflowMode": "entry_intake",
-                "assistantMessage": intake_result["assistantMessage"],
+                "caseId": output.get("caseId") or delivery.get("caseId") or confirmed_payload["caseId"],
+                "delivery": delivery,
+                "run": output.get("run"),
+                "structuredReport": output.get("structuredReport"),
+                "reportStatus": output.get("reportStatus") or delivery.get("status"),
+                "workflowMode": output.get("workflowMode") or delivery.get("workflowMode"),
+                "persistence": output.get("persistence"),
+                "assistantMessage": assistant_message,
                 "entryAgent": {
-                    "mode": _entry_agent_mode(intake_result),
+                    "mode": "cloud-supervisor-handoff",
                     "adapterVersion": "asi-one-entry-agent-v2",
                     "conversationId": conversation_id,
-                    **intake_result,
+                    "caseId": output.get("caseId") or delivery.get("caseId") or confirmed_payload["caseId"],
+                    "status": "delivered",
+                    "assistantMessage": assistant_message,
+                    "intakeMode": intake_result.get("intakeMode"),
+                    "fallbackReason": intake_result.get("fallbackReason"),
+                    "intake": intake_result["intake"],
                 },
             }
         }
+    except (AdapterValidationError, IntakeValidationError) as exc:
+        return _blocked_entry_output(payload, str(exc))
 
-    confirmed_payload = build_confirmed_entry_payload(turn, intake_result)
-    _PENDING_INTAKES.pop(conversation_id, None)
 
-    runtime_arn = supervisor_runtime_arn or os.getenv("RAMS_SUPERVISOR_RUNTIME_ARN")
-    if not runtime_arn:
-        raise AdapterValidationError("RAMS_SUPERVISOR_RUNTIME_ARN is required for cloud supervisor handoff.")
-
-    invocation = build_agentcore_invocation(confirmed_payload)
-    agentcore_response = invoke_runtime(
-        runtime_arn=runtime_arn,
-        payload=invocation,
-        session_id=_agentcore_session_id(conversation_id),
-        user_id=user_id,
-    )
-    delivery = build_delivery_payload(agentcore_response, entry_payload=confirmed_payload)
-    assistant_message = _delivery_assistant_message(delivery)
-    output = agentcore_response.get("output") if isinstance(agentcore_response.get("output"), dict) else {}
+def _blocked_entry_output(payload: dict[str, Any], reason: str) -> dict[str, Any]:
+    runtime_options = payload.get("runtimeOptions") if isinstance(payload.get("runtimeOptions"), dict) else {}
+    conversation_id = str(payload.get("conversationId") or payload.get("sessionId") or "frontend-demo-session")
     return {
         "output": {
-            "caseId": output.get("caseId") or delivery.get("caseId") or confirmed_payload["caseId"],
-            "delivery": delivery,
-            "run": output.get("run"),
-            "structuredReport": output.get("structuredReport"),
-            "reportStatus": output.get("reportStatus") or delivery.get("status"),
-            "workflowMode": output.get("workflowMode") or delivery.get("workflowMode"),
-            "persistence": output.get("persistence"),
-            "assistantMessage": assistant_message,
+            "caseId": payload.get("caseId"),
+            "delivery": None,
+            "run": None,
+            "structuredReport": None,
+            "reportStatus": "blocked",
+            "workflowMode": "entry_intake",
+            "runtime": {
+                "bedrockRequested": bool(runtime_options.get("useBedrock", True)),
+                "bedrockEnabled": False,
+                "bedrockUsed": False,
+                "activeAgentMode": "entry-blocked",
+                "fallbackReason": reason,
+            },
             "entryAgent": {
-                "mode": "cloud-supervisor-handoff",
+                "mode": "intake-coordinator",
                 "adapterVersion": "asi-one-entry-agent-v2",
                 "conversationId": conversation_id,
-                "caseId": output.get("caseId") or delivery.get("caseId") or confirmed_payload["caseId"],
-                "status": "delivered",
-                "assistantMessage": assistant_message,
-                "intakeMode": intake_result.get("intakeMode"),
-                "fallbackReason": intake_result.get("fallbackReason"),
-                "intake": intake_result["intake"],
+                "status": "blocked",
+                "assistantMessage": "I could not launch the supervisor workflow because the entry payload failed validation.",
+                "fallbackReason": reason,
+                "intake": None,
             },
         }
     }

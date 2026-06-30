@@ -191,7 +191,8 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
     reasoning = reasoning_result["reasoning"]
     trace.append(reasoning_result["trace"])
 
-    runtime = config.public_runtime(status=bedrock_status, fallback_reason=bedrock_fallback_reason)
+    runtime_fallback_reason = _runtime_fallback_reason(planner_result, bedrock_fallback_reason)
+    runtime = config.public_runtime(status=bedrock_status, fallback_reason=runtime_fallback_reason)
     runtime["fixturePack"] = fixture_pack["name"] if fixture_pack else None
     runtime["fixturePackMode"] = "cached-public-fixture" if fixture_pack else "synthetic-default"
     runtime["liveApiCalls"] = False
@@ -199,6 +200,7 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
     runtime["plannerMode"] = planner_result["plannerStatus"]
     runtime["activeAgentMode"] = planner_result["activeAgentMode"]
     runtime["modelCallCount"] = len(planner_result["modelCalls"])
+    runtime["bedrockUsed"] = bedrock_status in {"real", "mocked"} or planner_result["plannerStatus"] in {"real", "mocked"}
     runtime["caseId"] = case_id
     runtime["materialIngestionStatus"] = material_result["status"]
     runtime["materialEvidenceCount"] = len(material_evidence)
@@ -271,6 +273,15 @@ def _correlate_trace(trace: list[dict[str, Any]], case_id: str) -> list[dict[str
             enriched["output"] = output
         correlated.append(enriched)
     return correlated
+
+
+def _runtime_fallback_reason(planner_result: dict[str, Any], briefing_reason: str | None) -> str | None:
+    reasons = []
+    planner_reason = (planner_result.get("fallback") or {}).get("reason")
+    for reason in (planner_reason, briefing_reason):
+        if reason and reason not in reasons:
+            reasons.append(str(reason))
+    return " ".join(reasons) if reasons else None
 
 
 def _normalize_safety_payload(value: Any) -> tuple[dict[str, Any], dict[str, Any] | None]:
