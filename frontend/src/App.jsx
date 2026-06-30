@@ -166,14 +166,34 @@ function SceneViewer({ scene, annotations, location }) {
 }
 
 function CandidateMapPreview({ candidate }) {
-  if (!candidate?.latitude || !candidate?.longitude) return null;
+  const latitude = Number(candidate?.latitude);
+  const longitude = Number(candidate?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
   const context = candidate.locationContext || {};
   const submitted = context.submittedLocation;
+  const bboxPadding = 0.035;
+  const bbox = [
+    longitude - bboxPadding,
+    latitude - bboxPadding,
+    longitude + bboxPadding,
+    latitude + bboxPadding,
+  ].map((value) => value.toFixed(6)).join(",");
+  const marker = `${latitude.toFixed(6)},${longitude.toFixed(6)}`;
+  const mapSrc = `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${encodeURIComponent(marker)}`;
+  const mapLink = `https://www.openstreetmap.org/?mlat=${latitude.toFixed(6)}&mlon=${longitude.toFixed(6)}#map=15/${latitude.toFixed(6)}/${longitude.toFixed(6)}`;
   return (
     <div className="candidate-map-preview">
       <div className="candidate-map-canvas" aria-label="Candidate location preview">
-        <span className="candidate-map-pin" />
-        <div className="candidate-map-grid" />
+        <iframe
+          className="candidate-map-frame"
+          title={`Map preview for ${candidate.name || "candidate site"}`}
+          src={mapSrc}
+          loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+        />
+        <div className="candidate-map-source">
+          OpenStreetMap preview - confirm before tools run
+        </div>
       </div>
       <div className="candidate-map-summary">
         <strong>{candidate.name || "Candidate site"}</strong>
@@ -185,9 +205,10 @@ function CandidateMapPreview({ candidate }) {
           </div>
           <div>
             <dt>coordinate</dt>
-            <dd>{candidate.latitude}, {candidate.longitude}</dd>
+            <dd>{latitude.toFixed(6)}, {longitude.toFixed(6)}</dd>
           </div>
         </dl>
+        <a href={mapLink} target="_blank" rel="noreferrer">Open larger map</a>
       </div>
     </div>
   );

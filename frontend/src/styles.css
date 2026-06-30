@@ -557,48 +557,44 @@ textarea {
 
 .candidate-map-preview {
   display: grid;
-  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(420px, 1.25fr) minmax(320px, 0.75fr);
+  gap: 16px;
   margin: 0 14px 14px;
   border: 1px solid #d8e3de;
   border-radius: 8px;
-  padding: 12px;
+  padding: 16px;
   background: #f7faf8;
 }
 
 .candidate-map-canvas {
   position: relative;
-  min-height: 190px;
+  min-height: 360px;
   overflow: hidden;
   border: 1px solid #cbd8d2;
   border-radius: 8px;
-  background:
-    radial-gradient(circle at center, rgba(11, 111, 101, 0.18), transparent 24%),
-    linear-gradient(90deg, rgba(11, 111, 101, 0.12) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(11, 111, 101, 0.12) 1px, transparent 1px),
-    #e1ebe6;
-  background-size: auto, 28px 28px, 28px 28px, auto;
+  background: #dfe8e4;
 }
 
-.candidate-map-grid {
-  position: absolute;
-  inset: 18px;
-  border: 2px dashed rgba(11, 111, 101, 0.36);
-  border-radius: 10px;
+.candidate-map-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  border: 0;
 }
 
-.candidate-map-pin {
+.candidate-map-source {
   position: absolute;
-  z-index: 2;
-  top: 50%;
-  left: 50%;
-  width: 18px;
-  height: 18px;
-  border: 3px solid #ffffff;
+  right: 10px;
+  bottom: 10px;
+  max-width: calc(100% - 20px);
+  border: 1px solid rgba(8, 55, 49, 0.18);
   border-radius: 999px;
-  background: #0b6f65;
-  box-shadow: 0 0 0 8px rgba(11, 111, 101, 0.18);
-  transform: translate(-50%, -50%);
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #40564f;
+  font-size: 0.72rem;
+  font-weight: 800;
+  box-shadow: 0 8px 20px rgba(8, 55, 49, 0.1);
 }
 
 .candidate-map-summary {
@@ -614,6 +610,21 @@ textarea {
 .candidate-map-summary span {
   color: #40564f;
   font-weight: 800;
+}
+
+.candidate-map-summary a {
+  width: fit-content;
+  border: 1px solid #0b6f65;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #0b6f65;
+  font-size: 0.86rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.candidate-map-summary a:hover {
+  background: #e7f2ee;
 }
 
 .candidate-map-summary dl {
@@ -832,6 +843,12 @@ textarea {
 
   .candidate-map-preview {
     grid-template-columns: 1fr;
+    padding: 12px;
+  }
+
+  .candidate-map-canvas,
+  .candidate-map-frame {
+    min-height: 300px;
   }
 }
 
