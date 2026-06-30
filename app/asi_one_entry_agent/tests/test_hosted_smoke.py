@@ -70,12 +70,23 @@ class HostedAgentCoreAsioSmokeTests(unittest.TestCase):
                 invoke_runtime=fake_supervisor_runtime,
             )
 
-        result = hosted_smoke.run_smoke(fake_entry, case_id="case_hosted_smoke_unit_001")
+        result = hosted_smoke.run_smoke(
+            fake_entry,
+            case_id="case_hosted_smoke_unit_001",
+            bedrock_fallback=True,
+        )
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["caseId"], "case_hosted_smoke_unit_001")
-        self.assertEqual([check["status"] for check in result["checks"]], ["ok", "ok", "ok", "ok", "ok", "ok"])
+        self.assertEqual([check["status"] for check in result["checks"]], ["ok", "ok", "ok", "ok", "ok", "ok", "ok"])
+        self.assertEqual(result["checks"][-1]["name"], "bedrock_requested_fallback")
         self.assertTrue(result["supervisor"]["structuredReport"])
+
+    def test_frontend_html_validation_is_public_safe(self):
+        self.assertEqual(
+            hosted_smoke._validate_frontend_html('<html><body><div id="root"></div></body></html>'),
+            {"status": "ok", "appShell": True},
+        )
 
     def test_redaction_removes_secret_and_account_sensitive_values(self):
         fake_access_key = "AKIA" + "1234567890ABCDEF"

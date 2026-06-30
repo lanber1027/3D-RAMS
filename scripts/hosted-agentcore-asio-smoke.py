@@ -12,6 +12,8 @@ from urllib import error, request
 
 
 REPORT_ACCESS_SCHEMA_VERSION = "3d-rams.report-access.v1"
+EXPECTED_REPORT_STATUS = "review_required"
+EXPECTED_WORKFLOW_MODE = "cached_public_fixture"
 
 
 class SmokeFailure(AssertionError):
@@ -23,6 +25,8 @@ def run_smoke(
     *,
     case_id: str | None = None,
     require_persistence: bool = True,
+    bedrock_fallback: bool = False,
+    expected_subagent_mode: str | None = None,
 ) -> dict[str, Any]:
     case_id = case_id or f"case_hosted_smoke_{uuid.uuid4().hex[:10]}"
     conversation_id = f"hosted-smoke-{uuid.uuid4().hex[:10]}"
@@ -47,17 +51,28 @@ def run_smoke(
     output = _output(launch)
     run = _dict(output.get("run"))
     report = _dict(output.get("structuredReport"))
+    runtime = _dict(run.get("runtime"))
     _assert(output.get("caseId") == case_id, "confirmed launch did not preserve caseId")
+    _assert(output.get("reportStatus") == EXPECTED_REPORT_STATUS, "confirmed launch returned unexpected reportStatus")
+    _assert(output.get("workflowMode") == EXPECTED_WORKFLOW_MODE, "confirmed launch returned unexpected workflowMode")
     _assert(run.get("caseId") == case_id, "supervisor run did not echo caseId")
     _assert(report.get("caseId") == case_id, "structuredReport did not echo caseId")
     _assert(_list(run.get("trace")), "supervisor returned no trace")
     _assert(_list(run.get("evidence")), "supervisor returned no evidence")
     _assert(isinstance(run.get("safety"), dict), "supervisor returned no safety object")
+    _assert(runtime.get("subagentExecutionMode"), "supervisor runtime did not report subagentExecutionMode")
+    if expected_subagent_mode:
+        _assert(
+            runtime.get("subagentExecutionMode") == expected_subagent_mode,
+            f"subagentExecutionMode was not {expected_subagent_mode}",
+        )
     checks.append(
         {
             "name": "confirmed_entry_launches_supervisor",
             "status": "ok",
             "reportStatus": output.get("reportStatus"),
+            "workflowMode": output.get("workflowMode"),
+            "subagentExecutionMode": runtime.get("subagentExecutionMode"),
             "traceSteps": len(_list(run.get("trace"))),
             "evidenceItems": len(_list(run.get("evidence"))),
         }
@@ -125,9 +140,55 @@ def run_smoke(
         }
     )
 
+    if bedrock_fallback:
+        bedrock_case_id = f"{case_id}_bedrock"
+        bedrock_launch = invoke_entry(
+            _confirmed_launch_payload(
+                bedrock_case_id,
+                f"{conversation_id}-bedrock",
+                use_bedrock=True,
+            )
+        )
+        bedrock_output = _output(bedrock_launch)
+        bedrock_run = _dict(bedrock_output.get("run"))
+        bedrock_runtime = _dict(bedrock_run.get("runtime"))
+        _assert(bedrock_output.get("caseId") == bedrock_case_id, "Bedrock fallback launch did not preserve caseId")
+        _assert(bedrock_runtime.get("bedrockRequested") is True, "Bedrock fallback launch did not request Bedrock")
+        _assert(
+            bedrock_runtime.get("briefingMode") in {"disabled", "fallback"},
+            "Bedrock-requested fallback did not use disabled/fallback briefing mode",
+        )
+        _assert(bedrock_runtime.get("fallbackReason"), "Bedrock-requested fallback did not report fallbackReason")
+        checks.append(
+            {
+                "name": "bedrock_requested_fallback",
+                "status": "ok",
+                "briefingMode": bedrock_runtime.get("briefingMode"),
+                "fallback": True,
+            }
+        )
+
     return redact_public_safe(
         _summary(case_id=case_id, checks=checks, output=output, run=run, report=report)
     )
+
+
+def check_frontend_url(frontend_url: str, *, timeout: int) -> dict[str, Any]:
+    req = request.Request(frontend_url, headers={"accept": "text/html"}, method="GET")
+    try:
+        with request.urlopen(req, timeout=timeout) as response:
+            html = response.read().decode("utf-8", errors="replace")
+    except error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        raise SmokeFailure(f"Amplify frontend returned HTTP {exc.code}: {redact_text(raw[:800])}") from exc
+    except error.URLError as exc:
+        raise SmokeFailure(f"Amplify frontend request failed: {redact_text(str(exc))}") from exc
+    return _validate_frontend_html(html)
+
+
+def _validate_frontend_html(html: str) -> dict[str, Any]:
+    _assert('id="root"' in html, "Amplify frontend did not return the React app shell")
+    return {"status": "ok", "appShell": True}
 
 
 def invoke_entry_url(entry_url: str, payload: dict[str, Any], *, timeout: int) -> dict[str, Any]:
@@ -183,7 +244,7 @@ def redact_text(text: str) -> str:
     return text
 
 
-def _confirmed_launch_payload(case_id: str, conversation_id: str) -> dict[str, Any]:
+def _confirmed_launch_payload(case_id: str, conversation_id: str, *, use_bedrock: bool = False) -> dict[str, Any]:
     return {
         "entryTurn": True,
         "caller": "hosted-smoke",
@@ -232,7 +293,7 @@ def _confirmed_launch_payload(case_id: str, conversation_id: str) -> dict[str, A
         },
         "runtimeOptions": {
             "fixturePack": "public-lambeth-thames",
-            "useBedrock": False,
+            "useBedrock": use_bedrock,
             "includePlanningFixture": True,
             "simulateMapFailure": False,
         },
@@ -324,8 +385,11 @@ def main() -> int:
         description="Run hosted AgentCore + ASI/ASI:ONE smoke parity against the signed entry proxy."
     )
     parser.add_argument("--entry-url", default=os.getenv("RAMS_HOSTED_ENTRY_URL") or os.getenv("VITE_CLOUD_ENTRY_PROXY_URL"))
+    parser.add_argument("--frontend-url", default=os.getenv("RAMS_HOSTED_FRONTEND_URL"))
     parser.add_argument("--timeout", type=int, default=int(os.getenv("RAMS_HOSTED_SMOKE_TIMEOUT", "120")))
     parser.add_argument("--case-id", default=os.getenv("RAMS_HOSTED_SMOKE_CASE_ID"))
+    parser.add_argument("--expected-subagent-mode", default=os.getenv("RAMS_HOSTED_EXPECT_SUBAGENT_MODE"))
+    parser.add_argument("--bedrock-fallback", action="store_true", default=os.getenv("RAMS_HOSTED_SMOKE_BEDROCK_FALLBACK", "").lower() in {"1", "true", "yes", "on"})
     parser.add_argument(
         "--allow-unstored",
         action="store_true",
@@ -338,11 +402,16 @@ def main() -> int:
         return 2
 
     try:
+        frontend = check_frontend_url(args.frontend_url, timeout=args.timeout) if args.frontend_url else None
         result = run_smoke(
             lambda payload: invoke_entry_url(args.entry_url, payload, timeout=args.timeout),
             case_id=args.case_id,
             require_persistence=not args.allow_unstored,
+            bedrock_fallback=args.bedrock_fallback,
+            expected_subagent_mode=args.expected_subagent_mode,
         )
+        if frontend:
+            result["frontend"] = frontend
     except (SmokeFailure, json.JSONDecodeError) as exc:
         print(f"Hosted smoke failed: {redact_text(str(exc))}", file=sys.stderr)
         return 1
