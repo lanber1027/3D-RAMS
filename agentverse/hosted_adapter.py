@@ -1,9 +1,8 @@
-import json
 import os
 import uuid
 from datetime import datetime, timezone
 
-from agentcore_client import invoke_runtime_text
+from agentcore_client import extract_json_body, extract_text_body, invoke_runtime_text
 from uagents import Agent, Context, Protocol
 from uagents_core.contrib.protocols.chat import (
     ChatAcknowledgement,
@@ -67,7 +66,7 @@ def invoke_agentcore(prompt: str, sender: str) -> str:
         timeout=60,
     )
     _remember_pending_intake(session_id, response_text)
-    return response_text
+    return extract_text_body(response_text) or response_text
 
 
 def _looks_like_confirmation(prompt: str) -> bool:
@@ -76,9 +75,8 @@ def _looks_like_confirmation(prompt: str) -> bool:
 
 
 def _remember_pending_intake(session_id: str, response_text: str) -> None:
-    try:
-        response = json.loads(response_text)
-    except json.JSONDecodeError:
+    response = extract_json_body(response_text)
+    if response is None:
         return
     output = response.get("output") if isinstance(response, dict) else {}
     entry_agent = output.get("entryAgent") if isinstance(output, dict) else {}
@@ -109,7 +107,10 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
             reply = invoke_agentcore(prompt, sender)
         except Exception as exc:  # noqa: BLE001 - return a safe user-facing adapter failure.
             ctx.logger.exception("AgentCore invocation failed")
+            detail = str(exc).strip()
             reply = f"AgentCore invocation failed: {type(exc).__name__}"
+            if detail:
+                reply = f"{reply}: {detail[:700]}"
 
     await ctx.send(
         sender,
