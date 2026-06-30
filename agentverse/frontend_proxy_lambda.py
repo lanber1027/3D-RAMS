@@ -65,14 +65,21 @@ def _json_body(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def _response(payload: dict[str, Any], *, status: int = 200) -> dict[str, Any]:
+    headers = {
+        "content-type": "application/json",
+    }
+    if os.getenv("AGENTCORE_PROXY_EMIT_CORS_HEADERS", "").lower() in {"1", "true", "yes"}:
+        headers.update(
+            {
+                "access-control-allow-origin": os.getenv("AGENTCORE_PROXY_ALLOWED_ORIGIN", "*"),
+                "access-control-allow-methods": "GET,POST,OPTIONS",
+                "access-control-allow-headers": "content-type,authorization",
+            }
+        )
+
     return {
         "statusCode": status,
-        "headers": {
-            "content-type": "application/json",
-            "access-control-allow-origin": os.getenv("AGENTCORE_PROXY_ALLOWED_ORIGIN", "*"),
-            "access-control-allow-methods": "GET,POST,OPTIONS",
-            "access-control-allow-headers": "content-type,authorization",
-        },
+        "headers": headers,
         "body": "" if status == 204 else json.dumps(payload),
     }
 
