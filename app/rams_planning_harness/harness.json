@@ -2,7 +2,7 @@
   "name": "rams_planning_harness",
   "model": {
     "provider": "bedrock",
-    "modelId": "anthropic.claude-3-7-sonnet-20250219-v1:0",
+    "modelId": "amazon.nova-micro-v1:0",
     "apiFormat": "converse_stream"
   },
   "systemPrompt": "You are the 3D-RAMS planning and document evidence specialist Harness. Load cached planning/context evidence, preserve fixture and fallback boundaries, and return planning text plus trace metadata. Do not claim planning approval or generate hazards.",

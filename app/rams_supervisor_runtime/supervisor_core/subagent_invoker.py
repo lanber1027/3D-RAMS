@@ -20,6 +20,7 @@ from rams_agent_tools.tools import (
     load_planning_context,
     resolve_location,
     safety_gate,
+    trace_step,
 )
 
 
@@ -312,9 +313,68 @@ class AgentCoreHarnessInvoker:
                 messages.append({"role": "assistant", "content": parsed["assistantContent"]})
                 messages.append(_tool_result_message(parsed["toolUses"]))
                 continue
-            return _extract_json_object(parsed["text"])
+            result = _extract_json_object(parsed["text"])
+            missing_keys = _missing_required_keys(result, payload)
+            if missing_keys:
+                return self._fallback_json(group, payload, missing_keys=missing_keys, raw_result=result)
+            return result
 
         raise RuntimeError(f"Harness '{harness_name}' exceeded local tool-loop limit.")
+
+    def _fallback_json(
+        self,
+        group: str,
+        payload: dict[str, Any],
+        *,
+        missing_keys: list[str],
+        raw_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        fixture_pack = _load_tool_fixture_pack(payload.get("fixturePack"))
+        direct = DirectSubagentInvoker()
+
+        if group == "geospatial_subagent":
+            result = direct.invoke_geospatial(_dict(payload.get("request")), fixture_pack=fixture_pack)
+        elif group == "planning_subagent":
+            result = direct.invoke_planning(
+                {"includePlanningFixture": bool(payload.get("includePlanningFixture", True))},
+                fixture_pack=fixture_pack,
+            )
+        elif group == "hazard_subagent":
+            result = direct.invoke_hazard(
+                payload.get("planningText"),
+                _list(payload.get("features")),
+                fixture_pack=fixture_pack,
+            )
+        elif group == "annotation_subagent":
+            result = direct.invoke_annotation(_dict(payload.get("location")), _list(payload.get("hazards")))
+        elif group == "briefing_subagent":
+            result = direct.invoke_briefing(
+                self.config,
+                _dict(payload.get("location")),
+                _list(payload.get("hazards")),
+                payload.get("planningText"),
+                fixture_pack=fixture_pack,
+            )
+        elif group == "review_guardrail":
+            result = direct.invoke_review(_dict(payload.get("request")), _dict(payload.get("briefing")))
+        else:
+            raise RuntimeError(f"Cannot build fallback result for Harness subagent group '{group}'.")
+
+        result.setdefault("trace", [])
+        result["trace"].append(
+            trace_step(
+                "agentcore_harness_schema_fallback",
+                "fallback",
+                "Supervisor used deterministic tool fallback because Harness output missed required keys.",
+                {
+                    "group": group,
+                    "missingKeys": missing_keys,
+                    "rawResultKeys": sorted(raw_result.keys()),
+                },
+                fallback_reason="agentcore_harness_missing_required_keys",
+            )
+        )
+        return result
 
 
 def build_subagent_invoker(config: RuntimeConfig) -> SubagentInvoker:
@@ -560,6 +620,13 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise RuntimeError("Harness response JSON must be an object.")
     return parsed
+
+
+def _missing_required_keys(result: dict[str, Any], payload: dict[str, Any]) -> list[str]:
+    required = payload.get("requiredKeys")
+    if not isinstance(required, list):
+        return []
+    return [str(key) for key in required if str(key) not in result]
 
 
 def _dict(value: Any) -> dict[str, Any]:

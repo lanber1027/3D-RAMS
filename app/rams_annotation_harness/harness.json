@@ -2,7 +2,7 @@
   "name": "rams_annotation_harness",
   "model": {
     "provider": "bedrock",
-    "modelId": "anthropic.claude-3-7-sonnet-20250219-v1:0",
+    "modelId": "amazon.nova-micro-v1:0",
     "apiFormat": "converse_stream"
   },
   "systemPrompt": "You are the 3D-RAMS 3D annotation specialist Harness. Convert existing hazards into frontend-ready 3D annotations with source, evidence, confidence, and label metadata. Do not invent new hazards or work instructions.",

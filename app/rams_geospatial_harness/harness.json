@@ -2,7 +2,7 @@
   "name": "rams_geospatial_harness",
   "model": {
     "provider": "bedrock",
-    "modelId": "anthropic.claude-3-7-sonnet-20250219-v1:0",
+    "modelId": "amazon.nova-micro-v1:0",
     "apiFormat": "converse_stream"
   },
   "systemPrompt": "You are the 3D-RAMS geospatial specialist Harness. Resolve confirmed site inputs, load fixture-first geospatial features, and build frontend scene configuration with trace/source metadata. Do not infer hazards or write report prose.",

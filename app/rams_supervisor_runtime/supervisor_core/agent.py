@@ -82,13 +82,13 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
     features = geospatial_result["features"]
     scene = geospatial_result["scene"]
     planning_text = planning_result["planningText"]
-    trace.extend(geospatial_result["trace"])
-    trace.extend(planning_result["trace"])
+    trace.extend(_trace_steps(geospatial_result.get("trace"), "geospatial_subagent"))
+    trace.extend(_trace_steps(planning_result.get("trace"), "planning_subagent"))
 
     sequential_groups = subagent_plan["sequentialGroups"]
     hazard_result = subagents.invoke_hazard(planning_text, features, fixture_pack=fixture_pack)
-    hazards = hazard_result["hazards"]
-    trace.extend(hazard_result["trace"])
+    hazards = _dict_list(hazard_result.get("hazards"), "hazard_subagent", "hazards")
+    trace.extend(_trace_steps(hazard_result.get("trace"), "hazard_subagent"))
 
     report_groups = subagent_plan["reportParallelGroups"]
     trace.append(
@@ -123,17 +123,19 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
         annotation_result = annotations_future.result()
         briefing_result = briefing_future.result()
 
-    annotations = annotation_result["annotations"]
-    briefing = briefing_result["briefing"]
-    evidence = briefing_result["evidence"]
+    annotations = _dict_list(annotation_result.get("annotations"), "annotation_subagent", "annotations")
+    briefing = _briefing_payload(briefing_result.get("briefing"))
+    evidence = _evidence_items(briefing_result.get("evidence"))
     bedrock_status = briefing_result["bedrockStatus"]
     bedrock_fallback_reason = briefing_result["bedrockFallbackReason"]
-    trace.extend(annotation_result["trace"])
-    trace.extend(briefing_result["trace"])
+    trace.extend(_trace_steps(annotation_result.get("trace"), "annotation_subagent"))
+    trace.extend(_trace_steps(briefing_result.get("trace"), "briefing_subagent"))
 
     review_result = subagents.invoke_review(request, briefing)
-    safety = review_result["safety"]
-    trace.extend(review_result["trace"])
+    safety, safety_normalization_trace = _normalize_safety_payload(review_result.get("safety"))
+    trace.extend(_trace_steps(review_result.get("trace"), "review_guardrail"))
+    if safety_normalization_trace:
+        trace.append(safety_normalization_trace)
 
     sources = source_register(
         include_planning_fixture=request_summary["includePlanningFixture"],
@@ -192,3 +194,125 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
         "trace": trace,
         "architecture": architecture_snapshot(trace, request_summary, sources, evidence, safety, runtime),
     }
+
+
+def _normalize_safety_payload(value: Any) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    if isinstance(value, dict):
+        normalized = dict(value)
+        if "allowed" in normalized:
+            normalized["allowed"] = bool(normalized["allowed"])
+            normalized.setdefault("level", "review_required" if normalized["allowed"] else "blocked")
+            normalized.setdefault(
+                "message",
+                "Allowed as a non-certified pre-visit briefing that requires human review."
+                if normalized["allowed"]
+                else "Blocked by independent review.",
+            )
+            normalized.setdefault("triggeredRules", [])
+            normalized.setdefault("triggeredSources", {})
+            normalized.setdefault("requiresHumanReview", True)
+            normalized.setdefault(
+                "decisionId",
+                "safety-harness-review-required" if normalized["allowed"] else "safety-harness-blocked",
+            )
+            return normalized, None
+
+    raw_review = "" if value is None else str(value)
+    lower = raw_review.lower()
+    blocked = any(term in lower for term in ("block", "blocked", "reject", "rejected", "fail", "failed"))
+    normalized = {
+        "allowed": not blocked,
+        "level": "blocked" if blocked else "review_required",
+        "message": (
+            "Blocked by independent review output."
+            if blocked
+            else "Allowed as a non-certified pre-visit briefing that requires human review."
+        ),
+        "triggeredRules": ["review_harness_text_block"] if blocked else [],
+        "triggeredSources": {"reviewHarness": raw_review} if raw_review else {},
+        "requiresHumanReview": True,
+        "decisionId": "safety-harness-text-blocked" if blocked else "safety-harness-text-review-required",
+        "rawReview": raw_review,
+    }
+    return normalized, trace_step(
+        "normalize_review_safety",
+        "blocked" if blocked else "fallback",
+        "Supervisor normalized non-dict review Harness safety output.",
+        {
+            "allowed": normalized["allowed"],
+            "level": normalized["level"],
+            "rawReview": raw_review,
+        },
+        evidence_ids=["safety-policy"],
+        fallback_reason="review_harness_returned_non_dict_safety",
+    )
+
+
+def _trace_steps(value: Any, source: str) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    items = value if isinstance(value, list) else [value]
+    normalized: list[dict[str, Any]] = []
+    required = {"id", "name", "status", "summary", "durationMs", "sourceIds", "evidenceIds", "fallbackReason", "output"}
+    for index, item in enumerate(items):
+        if isinstance(item, dict) and required.issubset(item.keys()):
+            normalized.append(item)
+            continue
+        normalized.append(
+            trace_step(
+                "normalize_subagent_trace",
+                "fallback",
+                "Supervisor normalized non-standard Harness trace output.",
+                {
+                    "source": source,
+                    "index": index,
+                    "rawTrace": str(item)[:500],
+                },
+                fallback_reason="harness_returned_non_standard_trace",
+            )
+        )
+    return normalized
+
+
+def _dict_list(value: Any, source: str, field: str) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        return [value]
+    return []
+
+
+def _briefing_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    text = "" if value is None else str(value)
+    return {
+        "headline": "Harness briefing output normalized by supervisor.",
+        "summary": [text] if text else [],
+        "priority_checks": [],
+    }
+
+
+def _evidence_items(value: Any) -> list[dict[str, Any]]:
+    def complete(item: dict[str, Any], index: int) -> dict[str, Any]:
+        normalized = dict(item)
+        normalized.setdefault("id", f"evidence-harness-normalized-{index + 1}")
+        normalized.setdefault("title", "Harness evidence output normalized by supervisor")
+        normalized.setdefault("status", "fallback")
+        return normalized
+
+    if isinstance(value, list):
+        items = [complete(item, index) for index, item in enumerate(value) if isinstance(item, dict)]
+        if items:
+            return items
+    if isinstance(value, dict):
+        return [complete(value, 0)]
+    text = "" if value is None else str(value)
+    return [
+        {
+            "id": "evidence-harness-normalized",
+            "title": "Harness evidence output normalized by supervisor",
+            "status": "fallback",
+            "summary": text,
+        }
+    ]

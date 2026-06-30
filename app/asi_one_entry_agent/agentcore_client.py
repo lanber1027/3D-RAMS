@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -68,7 +69,7 @@ def invoke_runtime_text(
             path=path,
             host=host,
             payload=body,
-            session_id=session_id or _session_id(runtime_arn),
+            session_id=_runtime_session_id(session_id, runtime_arn),
             user_id=user_id or "3d-rams-cloud-proxy",
             region=region,
         ),
@@ -95,11 +96,10 @@ def signed_headers(
     user_id: str,
     region: str,
 ) -> dict[str, str]:
-    access_key = os.environ.get("AWS_ACCESS_KEY_ID")
-    secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
-    if not access_key or not secret_key:
-        raise AgentCoreInvokeError("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required for AgentCore signing.")
-    session_token = os.environ.get("AWS_SESSION_TOKEN")
+    credentials = _credentials()
+    access_key = credentials["access_key"]
+    secret_key = credentials["secret_key"]
+    session_token = credentials.get("token")
 
     now = datetime.now(timezone.utc)
     amz_date = now.strftime("%Y%m%dT%H%M%SZ")
@@ -216,3 +216,43 @@ def _signature_key(secret_key: str, date_stamp: str, region: str, service: str) 
 
 def _session_id(seed: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"3d-rams-agentcore:{seed}"))
+
+
+def _runtime_session_id(value: str | None, fallback_seed: str) -> str:
+    raw = str(value or "").strip()
+    sanitized = re.sub(r"[^A-Za-z0-9-]+", "-", raw).strip("-")
+    if len(sanitized) >= 33:
+        return sanitized[:128]
+    prefix = sanitized or "3d-rams-agentcore-session"
+    suffix = uuid.uuid5(uuid.NAMESPACE_URL, f"3d-rams-agentcore-session:{fallback_seed}:{raw}").hex
+    return f"{prefix}-{suffix}"[:128]
+
+
+def _credentials() -> dict[str, str | None]:
+    access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+    secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+    if access_key and secret_key:
+        return {
+            "access_key": access_key,
+            "secret_key": secret_key,
+            "token": os.environ.get("AWS_SESSION_TOKEN"),
+        }
+
+    try:
+        import botocore.session
+    except ImportError as exc:
+        raise AgentCoreInvokeError(
+            "AWS credentials are required for AgentCore signing. Set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY "
+            "or run inside an AWS runtime with botocore credentials."
+        ) from exc
+
+    session = botocore.session.get_session()
+    resolved = session.get_credentials()
+    if not resolved:
+        raise AgentCoreInvokeError("Could not resolve AWS credentials for AgentCore signing.")
+    frozen = resolved.get_frozen_credentials()
+    return {
+        "access_key": frozen.access_key,
+        "secret_key": frozen.secret_key,
+        "token": frozen.token,
+    }

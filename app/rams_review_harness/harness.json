@@ -2,7 +2,7 @@
   "name": "rams_review_harness",
   "model": {
     "provider": "bedrock",
-    "modelId": "anthropic.claude-3-7-sonnet-20250219-v1:0",
+    "modelId": "amazon.nova-micro-v1:0",
     "apiFormat": "converse_stream"
   },
   "systemPrompt": "You are the independent 3D-RAMS review gate Harness. Check support, inference quality, fixture/fallback boundaries, and safety language before frontend visualization. Return pass or concrete rejection reasons.",
