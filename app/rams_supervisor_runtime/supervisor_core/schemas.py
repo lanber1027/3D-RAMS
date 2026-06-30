@@ -53,6 +53,11 @@ class SiteBriefRequest(BaseModel):
         default=True,
         description="Whether the run requests the optional Bedrock briefing path. Environment config still controls whether Bedrock is actually used.",
     )
+    agentMode: str = Field(
+        default="llm-planner",
+        max_length=80,
+        description="Requested supervisor mode. Planner phase is always present; Bedrock availability controls whether it is LLM-backed or deterministic.",
+    )
     additionalRequest: str | None = Field(
         default=None,
         max_length=1000,
@@ -76,6 +81,7 @@ class ReportIntake(BaseModel):
     includePlanningFixture: bool
     simulateMapFailure: bool
     useBedrock: bool
+    agentMode: str
     additionalRequest: str | None = None
     upstream: dict[str, Any] | None = None
 
@@ -97,6 +103,10 @@ class ReportRuntime(BaseModel):
     fallbackReason: str | None = None
     awsRegion: str | None = None
     modelId: str | None = None
+    plannerMode: str | None = None
+    activeAgentMode: str | None = None
+    modelCallCount: int = 0
+    subagentExecutionMode: str | None = None
 
 
 class ExecutiveSummary(BaseModel):
@@ -188,5 +198,9 @@ class StructuredReport(BaseModel):
     reviewGate: ReviewGate
     dataQuality: DataQuality
     externalSignals: ExternalSignals = Field(default_factory=ExternalSignals)
+    llmPlan: dict[str, Any] = Field(default_factory=dict)
+    modelCalls: list[dict[str, Any]] = Field(default_factory=list)
+    tokenUsage: dict[str, Any] | None = None
+    fallback: dict[str, Any] = Field(default_factory=dict)
     trace: list[dict[str, Any]] = Field(default_factory=list)
     architecture: dict[str, Any] | None = None

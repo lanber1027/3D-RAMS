@@ -14,6 +14,7 @@ from rams_agent_tools.tools import (
 )
 
 from .subagent_invoker import build_subagent_invoker
+from .planner import plan_subagent_workflow
 
 
 def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -43,18 +44,24 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
             )
         )
 
+    planner_result = plan_subagent_workflow(config=config, request_summary=request_summary)
+    subagent_plan = planner_result["plan"]
+    trace.append(planner_result["trace"])
+
+    initial_groups = subagent_plan["initialParallelGroups"]
     trace.append(
         trace_step(
             "dispatch_parallel_tool_groups",
             "ok",
-            "Supervisor dispatched initial Harness subagent groups in parallel.",
+            "Supervisor dispatched planner-selected initial Harness subagent groups in parallel.",
             {
                 "mode": subagents.execution_mode,
-                "groups": ["geospatial_subagent", "planning_subagent"],
+                "groups": initial_groups,
                 "harnesses": {
                     "geospatial_subagent": harness_for_group("geospatial_subagent"),
                     "planning_subagent": harness_for_group("planning_subagent"),
                 },
+                "plannerMode": planner_result["activeAgentMode"],
             },
         )
     )
@@ -72,22 +79,26 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
     trace.extend(geospatial_result["trace"])
     trace.extend(planning_result["trace"])
 
+    sequential_groups = subagent_plan["sequentialGroups"]
     hazard_result = subagents.invoke_hazard(planning_text, features, fixture_pack=fixture_pack)
     hazards = hazard_result["hazards"]
     trace.extend(hazard_result["trace"])
 
+    report_groups = subagent_plan["reportParallelGroups"]
     trace.append(
         trace_step(
             "dispatch_parallel_report_groups",
             "ok",
-            "Supervisor dispatched report-preparation Harness subagent groups in parallel after hazard extraction.",
+            "Supervisor dispatched planner-selected report-preparation Harness subagent groups in parallel after hazard extraction.",
             {
                 "mode": subagents.execution_mode,
-                "groups": ["annotation_subagent", "briefing_subagent"],
+                "groups": report_groups,
+                "upstreamSequentialGroups": sequential_groups,
                 "harnesses": {
                     "annotation_subagent": harness_for_group("annotation_subagent"),
                     "briefing_subagent": harness_for_group("briefing_subagent"),
                 },
+                "plannerMode": planner_result["activeAgentMode"],
             },
         )
     )
@@ -123,18 +134,27 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
         bedrock_status=bedrock_status,
         config=config,
         fixture_pack=fixture_pack,
+        planner_status=planner_result["plannerStatus"],
     )
     runtime = config.public_runtime(status=bedrock_status, fallback_reason=bedrock_fallback_reason)
     runtime["fixturePack"] = fixture_pack["name"] if fixture_pack else None
     runtime["fixturePackMode"] = "cached-public-fixture" if fixture_pack else "synthetic-default"
     runtime["liveApiCalls"] = False
     runtime["subagentExecutionMode"] = subagents.execution_mode
+    runtime["plannerMode"] = planner_result["plannerStatus"]
+    runtime["activeAgentMode"] = planner_result["activeAgentMode"]
+    runtime["modelCallCount"] = len(planner_result["modelCalls"])
 
     return {
         "runId": "demo1-local-run",
         "upstream": upstream_context,
         "request": request_summary,
         "runtime": runtime,
+        "llmPlan": subagent_plan,
+        "subagentPlan": subagent_plan,
+        "modelCalls": planner_result["modelCalls"],
+        "tokenUsage": planner_result["tokenUsage"],
+        "fallback": planner_result["fallback"],
         "location": location,
         "scene": scene,
         "hazards": hazards if safety["allowed"] else [],

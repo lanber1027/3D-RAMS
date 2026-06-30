@@ -52,6 +52,10 @@ def build_structured_report(
         reviewGate=_build_review_gate(safety),
         dataQuality=_build_data_quality(run, runtime, trace, briefing),
         trace=trace,
+        llmPlan=_dict(run.get("llmPlan")),
+        modelCalls=_list(run.get("modelCalls")),
+        tokenUsage=_dict(run.get("tokenUsage")) or None,
+        fallback=_dict(run.get("fallback")),
         architecture=_dict(run.get("architecture")) or None,
     )
     return report.model_dump(mode="json", exclude_none=True)
@@ -65,6 +69,7 @@ def _build_intake(run: dict[str, Any], request: dict[str, Any]) -> ReportIntake:
         includePlanningFixture=bool(request.get("includePlanningFixture")),
         simulateMapFailure=bool(request.get("simulateMapFailure")),
         useBedrock=bool(request.get("useBedrock")),
+        agentMode=str(request.get("agentMode") or "llm-planner"),
         additionalRequest=request.get("additionalRequest"),
         upstream=_dict(run.get("upstream")) or None,
     )
@@ -94,6 +99,10 @@ def _build_runtime(runtime: dict[str, Any]) -> ReportRuntime:
         fallbackReason=runtime.get("fallbackReason"),
         awsRegion=runtime.get("awsRegion"),
         modelId=runtime.get("modelId"),
+        plannerMode=runtime.get("plannerMode"),
+        activeAgentMode=runtime.get("activeAgentMode"),
+        modelCallCount=int(runtime.get("modelCallCount") or 0),
+        subagentExecutionMode=runtime.get("subagentExecutionMode"),
     )
 
 

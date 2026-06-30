@@ -7,6 +7,7 @@ from ..config import RuntimeConfig
 
 def normalize_request(request: dict[str, Any]) -> dict[str, Any]:
     fixture_pack = request.get("fixturePack") or request.get("fixture_pack")
+    agent_mode = str(request.get("agentMode") or request.get("agent_mode") or "llm-planner").strip().lower()
     return {
         "siteName": request.get("siteName") or "Demo rural field fixture",
         "latitude": float(request.get("latitude", 52.2053)),
@@ -15,6 +16,7 @@ def normalize_request(request: dict[str, Any]) -> dict[str, Any]:
         "includePlanningFixture": bool(request.get("includePlanningFixture", True)),
         "simulateMapFailure": bool(request.get("simulateMapFailure")),
         "useBedrock": bool(request.get("useBedrock", True)),
+        "agentMode": agent_mode or "llm-planner",
         "fixturePack": str(fixture_pack).strip().lower() if fixture_pack else None,
         "additionalRequest": request.get("additionalRequest") or "",
     }
@@ -26,6 +28,7 @@ def source_register(
     bedrock_status: str,
     config: RuntimeConfig,
     fixture_pack: dict[str, Any] | None = None,
+    planner_status: str = "deterministic",
 ) -> list[dict[str, Any]]:
     sources: list[dict[str, Any]] = [
         {
@@ -87,6 +90,19 @@ def source_register(
                 "origin": "Frontend CesiumJS with AgentCore scene config",
                 "trustBoundary": "Browser rendering",
                 "awsMapping": "CloudFront/static frontend plus AgentCore Runtime",
+            },
+            {
+                "id": "bedrock-planner",
+                "label": "Amazon Bedrock supervisor planner",
+                "kind": "llm_planner",
+                "status": planner_status,
+                "origin": (
+                    f"{config.bedrock_model_id} in {config.aws_region}"
+                    if config.bedrock_enabled
+                    else "Deterministic/mock planner unless ENABLE_BEDROCK=true and request uses Bedrock"
+                ),
+                "trustBoundary": "AWS account boundary when enabled",
+                "awsMapping": "Amazon Bedrock InvokeModel for supervisor subagent planning",
             },
             {
                 "id": "bedrock-briefing",
