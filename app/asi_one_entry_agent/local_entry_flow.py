@@ -150,7 +150,9 @@ def _parse_intake(
     location_phrase = bool(re.search(r"\b(near|at|around|within|in|address|coordinate|landmark)\b", lower))
     site_label = _extract_site_label(message)
     has_site_signal = coordinate is not None or known_lambeth or farm_like or (location_phrase and bool(site_label))
-    has_scope_signal = bool(re.search(r"\b(radius|metre|meter|m\b|km|area|boundary|near|around|within)\b", lower))
+    has_scope_signal = _extract_distance_meters(message) is not None or bool(
+        re.search(r"\b(radius|area|boundary|near|around|within)\b", lower)
+    )
     has_goal_signal = bool(
         re.search(
             r"\b(risk|rams|review|survey|inspection|visit|access|planning|flood|hazard|constraint|brief)\b",
@@ -333,10 +335,24 @@ def _extract_site_label(message: str) -> str:
 
 
 def _area_scope(message: str) -> dict[str, Any]:
-    match = re.search(r"(\d{2,5})\s*(m|metre|meter|metres|meters)\b", message.lower())
-    if match:
-        return {"type": "radius", "meters": int(match.group(1))}
+    meters = _extract_distance_meters(message)
+    if meters is not None:
+        return {"type": "radius", "meters": meters}
     return {"type": "radius", "meters": 800}
+
+
+def _extract_distance_meters(message: str) -> int | None:
+    match = re.search(
+        r"\b(\d+(?:\.\d+)?)\s*(km|kilometer|kilometers|kilometre|kilometres|m|meter|meters|metre|metres)\b",
+        message.lower(),
+    )
+    if not match:
+        return None
+    value = float(match.group(1))
+    unit = match.group(2)
+    if unit.startswith("k"):
+        return int(value * 1000)
+    return int(value)
 
 
 def _goal_from_message(message: str) -> str:

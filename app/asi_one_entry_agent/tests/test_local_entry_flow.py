@@ -67,6 +67,22 @@ class LocalAsiOneEntryFlowTests(unittest.TestCase):
         self.assertEqual(response["runtime"]["supervisorRuntime"], "awaiting-confirmation")
         self.assertIn("8 Albert Embankment", response["confirmation"]["summary"])
 
+    def test_compact_kilometre_scope_is_launch_ready(self):
+        response = run_local_asione_chat(
+            {
+                "localAsiOne": True,
+                "sessionId": "local-test-session",
+                "message": "I want to visit 8 Albert Embankment tomorrow for a survey for 2km",
+                "confirmedByUser": False,
+                "runtimeOptions": {"useBedrock": False},
+            },
+            supervisor_invoker=handle_invocation,
+        )
+
+        self.assertFalse(response["needsClarification"])
+        self.assertTrue(response["needsConfirmation"])
+        self.assertIn("2000m area", response["confirmation"]["summary"])
+
     def test_confirmed_payload_runs_entry_supervisor_delivery_flow(self):
         payload = dict(LAUNCH_READY_PAYLOAD)
         payload["confirmedByUser"] = True
