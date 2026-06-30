@@ -1,4 +1,4 @@
-# ADR 0008: Tavily Open-Web Signals Subagent
+# ADR 0010: Tavily Open-Web Signals Subagent
 
 ## Status
 
@@ -170,4 +170,3 @@ Tradeoffs:
 - `dataQuality.completeness.hasOpenWebSignals` reflects whether usable signals were returned.
 - Open-web items are labeled as signals with URLs, dates where available, confidence, and flags.
 - No secrets, private content, or unsupported professional claims are emitted.
-
