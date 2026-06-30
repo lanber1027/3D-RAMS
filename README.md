@@ -6,6 +6,22 @@
 
 The current V3 rebuild makes chat the primary interface: a tester asks for a site visit briefing, the backend resolves or confirms the site first, then runs server-side tools and updates the UI with a 3D risk scene, evidence register, trace, confidence/fallback notes, safety gate, and RAMS-style review pack for human review. Bedrock access stays server-side.
 
+## Two Ways To Use 3D-RAMS
+
+### Hosted demo / judge version
+
+Use the hosted 3D-RAMS URL with a private access code from the maintainer:
+
+<https://main.d62sagixyhsmv.amplifyapp.com>
+
+This path is for judges and teammates. You only need a browser and the access code. You do not need AWS, Python, Node, Codespaces, local setup, or cloud credentials.
+
+### Deploy your own LLM version
+
+If you clone or fork this repo and want the live Bedrock-backed agent, you need to deploy your own AWS stack and configure your own server-side environment variables. The frontend must never call Bedrock directly and no AWS credentials should be committed to GitHub.
+
+Use [docs/deploy-your-own.md](docs/deploy-your-own.md) for the deployment checklist, required AWS resources, environment variables, access-code hash pattern, cost controls, and teardown reminder.
+
 ## Problem Statement
 
 Site teams preparing for unfamiliar rural, development, or infrastructure visits have to combine maps, terrain, access routes, planning records, document evidence, and risk notes before they can form a useful briefing. 3D-RAMS explores whether an agent can turn that fragmented digital work into an inspectable 3D pre-visit pack with evidence, annotations, trace, confidence labels, and a visible safety boundary.
@@ -124,7 +140,7 @@ Recommended local settings:
 
 ```bash
 ENABLE_BEDROCK=true
-AWS_PROFILE=3d-rams-dev
+AWS_PROFILE=your-local-aws-profile
 AWS_REGION=eu-west-2
 BEDROCK_MODEL_ID=anthropic.claude-3-7-sonnet-20250219-v1:0
 BEDROCK_MAX_TOKENS=1200

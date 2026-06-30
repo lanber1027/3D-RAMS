@@ -40,7 +40,7 @@ For one-off local smoke testing, use short fixture prompts only and stop if the 
 The current maintained local profile and model are:
 
 ```bash
-AWS_PROFILE=3d-rams-dev
+AWS_PROFILE=your-local-aws-profile
 AWS_REGION=eu-west-2
 BEDROCK_MODEL_ID=anthropic.claude-3-7-sonnet-20250219-v1:0
 BEDROCK_MAX_TOKENS=1200
