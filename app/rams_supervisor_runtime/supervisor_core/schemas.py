@@ -183,6 +183,7 @@ class ReviewGate(BaseModel):
     safetyLevel: str
     requiresHumanReview: bool
     message: str
+    reviewerMode: str | None = None
     triggeredRules: list[str] = Field(default_factory=list)
     reviewerNotes: list[str] = Field(default_factory=list)
     issues: list[dict[str, Any]] = Field(default_factory=list)

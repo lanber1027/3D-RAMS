@@ -290,6 +290,11 @@ def _build_review_gate(run: dict[str, Any], safety: dict[str, Any], reasoning: d
         safetyLevel=str(safety.get("level") or "unknown"),
         requiresHumanReview=bool(safety.get("requiresHumanReview", True)),
         message=str(safety.get("message") or "Safety gate result unavailable."),
+        decision="pending" if allowed else "block",
+        reviewerMode=str(safety.get("reviewerMode") or "deterministic"),
+        revisionCount=int(safety.get("revisionCount") or 0),
+        issues=_list(safety.get("issues")),
+        caveats=_string_list(safety.get("caveats")),
         triggeredRules=_string_list(safety.get("triggeredRules")),
         reviewerNotes=reviewer_notes,
     )

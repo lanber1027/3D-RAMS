@@ -65,12 +65,25 @@ function riskItemsFromRun(run) {
   return toList(run?.structuredReport?.findings);
 }
 
-function attachStructuredReport(run, structuredReport) {
+function attachStructuredReport(run, structuredReport, reviewMetadata) {
   if (!run || !structuredReport) return run;
+  const reviewGate = reviewMetadata || run.reviewMetadata || run.reviewGate || structuredReport.reviewGate || null;
   return {
     ...run,
     structuredReport,
+    ...(reviewGate ? { reviewGate, reviewMetadata: reviewGate } : {}),
   };
+}
+
+function reviewGateFromRun(run) {
+  return run?.reviewMetadata || run?.reviewGate || run?.structuredReport?.reviewGate || null;
+}
+
+function reviewToneFromStatus(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized.includes("block")) return "blocked";
+  if (normalized.includes("pass") || normalized.includes("allow")) return "allowed";
+  return "warning";
 }
 
 function runToUiState(run) {
@@ -519,6 +532,9 @@ function App() {
 
   const ui = entryResponse?.uiState || runToUiState(run);
   const runtime = entryResponse?.runtime || run?.runtime || {};
+  const reviewGate = reviewGateFromRun(run);
+  const reviewStatus = reviewGate?.status || reviewGate?.decision || "";
+  const reviewTone = reviewToneFromStatus(reviewStatus);
   const safetyTone = ui.safety?.allowed === false ? "blocked" : ui.safety?.level === "needs_input" ? "warning" : "allowed";
   const pendingConfirmation = entryResponse?.status === "confirmation_required" && entryResponse?.intake;
 
@@ -573,7 +589,11 @@ function App() {
         setRun(null);
         return;
       }
-      const nextRun = attachStructuredReport(nextEntryResponse?.run || payload.output?.run, output.structuredReport);
+      const nextRun = attachStructuredReport(
+        nextEntryResponse?.run || payload.output?.run,
+        output.structuredReport,
+        output.reviewMetadata || output.reviewGate,
+      );
       if (!nextRun) throw new Error("Entry agent response did not include a supervisor run");
       const nextCaseId = output.caseId || nextEntryResponse?.caseId || nextRun.caseId || "";
       setCaseId(nextCaseId);
@@ -610,7 +630,7 @@ function App() {
       }
       setEntryResponse(null);
       setCaseId(output.caseId || nextCaseId);
-      setRun(attachStructuredReport(output.run, output.structuredReport));
+      setRun(attachStructuredReport(output.run, output.structuredReport, output.reviewMetadata || output.reviewGate));
       setMessages([
         {
           id: `case-${nextCaseId}`,
@@ -704,6 +724,12 @@ function App() {
             <ShieldCheck size={16} />
             {ui.safety?.level || "ready"}
           </div>
+          {reviewStatus && (
+            <div className={`safety-pill ${reviewTone}`} title={reviewGate?.message || "review status"}>
+              <ShieldCheck size={16} />
+              Review {humanizeToken(reviewStatus)}
+            </div>
+          )}
           <div className="safety-pill pending">
             <Cloud size={16} />
             {runtime.subagentExecutionMode || runtime.supervisorRuntime || (USE_LOCAL_ASIONE ? "local" : "cloud")}

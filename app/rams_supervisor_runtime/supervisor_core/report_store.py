@@ -126,6 +126,8 @@ def load_report(
                     "structuredReport": item.get("structuredReport"),
                     "run": item.get("run"),
                     "reportAccess": binding_decision,
+                    "reviewGate": item.get("reviewGate"),
+                    "reviewMetadata": item.get("reviewMetadata"),
                     "evidenceSummary": item.get("evidenceSummary"),
                     "materialEvidenceSummary": item.get("materialEvidenceSummary"),
                     "citationMetadata": item.get("citationMetadata"),
@@ -167,6 +169,7 @@ def build_report_store_item(output: dict[str, Any]) -> dict[str, Any]:
     report = output.get("structuredReport") if isinstance(output.get("structuredReport"), dict) else {}
     stored_run = _storage_safe_payload(run)
     stored_report = _storage_safe_payload(report)
+    review_metadata = _review_metadata(case_id, report)
     safety = run.get("safety") if isinstance(run.get("safety"), dict) else {}
     location = run.get("location") if isinstance(run.get("location"), dict) else {}
     briefing = run.get("briefing") if isinstance(run.get("briefing"), dict) else {}
@@ -183,7 +186,12 @@ def build_report_store_item(output: dict[str, Any]) -> dict[str, Any]:
         "authorizationBinding": build_authorization_binding(output),
         "siteLabel": _text(location.get("label")) or _report_site_label(report),
         "safetyLevel": _text(safety.get("level")) or _report_safety_level(report),
-        "reviewGateStatus": _report_review_gate_status(report),
+        "reviewGateStatus": review_metadata.get("status"),
+        "reviewDecision": review_metadata.get("decision"),
+        "reviewerMode": review_metadata.get("reviewerMode"),
+        "reviewRevisionCount": review_metadata.get("revisionCount"),
+        "reviewGate": review_metadata,
+        "reviewMetadata": review_metadata,
         "evidenceCount": len(run.get("evidence") or []),
         "materialReferenceCount": int(material_ingestion.get("received") or 0),
         "materialEvidenceCount": int(material_ingestion.get("accepted") or 0),
@@ -272,6 +280,52 @@ def _dynamodb_table(table_name: str) -> DynamoTable:
         session_kwargs["region_name"] = os.environ["AWS_REGION"]
     session = boto3.Session(**session_kwargs)
     return session.resource("dynamodb").Table(table_name)
+
+
+def _review_metadata(case_id: str, report: dict[str, Any]) -> dict[str, Any]:
+    review_gate = report.get("reviewGate") if isinstance(report.get("reviewGate"), dict) else {}
+    reviewer = review_gate.get("reviewer") if isinstance(review_gate.get("reviewer"), dict) else {}
+    status = _text(review_gate.get("status")) or _text(report.get("status")) or "unknown"
+    decision = _text(review_gate.get("decision")) or _decision_from_status(status)
+    revision_count = _int_or_none(
+        review_gate.get("revisionCount")
+        if "revisionCount" in review_gate
+        else review_gate.get("revision_count")
+    )
+    if revision_count is None:
+        revision_count = len(review_gate.get("revisions") or [])
+
+    metadata = {
+        "schemaVersion": "3d-rams.review-metadata.v1",
+        "caseId": case_id,
+        "decision": decision,
+        "status": status,
+        "issues": _dict_list(review_gate.get("issues")),
+        "caveats": _public_list(review_gate.get("caveats")),
+        "revisionCount": revision_count,
+        "reviewerMode": _text(review_gate.get("reviewerMode")) or _text(reviewer.get("mode")) or "deterministic",
+        "requiresHumanReview": bool(review_gate.get("requiresHumanReview", True)),
+        "safetyAllowed": bool(review_gate.get("safetyAllowed", False)),
+        "safetyLevel": _text(review_gate.get("safetyLevel")),
+        "message": _text(review_gate.get("message")),
+    }
+    reviewer_name = _text(reviewer.get("name")) or _text(review_gate.get("reviewerName"))
+    if reviewer_name:
+        metadata["reviewerName"] = reviewer_name
+    return metadata
+
+
+def _decision_from_status(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized in {"passed", "pass"}:
+        return "pass"
+    if normalized in {"passed_with_caveats", "pass_with_caveats"}:
+        return "pass_with_caveats"
+    if normalized in {"blocked", "block"}:
+        return "block"
+    if normalized in {"revise", "revision_required"}:
+        return "revise"
+    return "pending"
 
 
 def _entry_intake_summary(run: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
@@ -456,6 +510,18 @@ def _string_list(value: Any) -> list[str]:
     return [str(item) for item in value if item is not None]
 
 
+def _dict_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _public_list(value: Any) -> list[Any]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, (str, int, float, bool, dict))]
+
+
 def _dynamo_safe(value: Any) -> Any:
     return json.loads(json.dumps(value), parse_float=Decimal)
 
@@ -502,11 +568,6 @@ def _report_site_label(report: dict[str, Any]) -> str | None:
 def _report_safety_level(report: dict[str, Any]) -> str | None:
     review_gate = report.get("reviewGate") if isinstance(report.get("reviewGate"), dict) else {}
     return _text(review_gate.get("safetyLevel"))
-
-
-def _report_review_gate_status(report: dict[str, Any]) -> str | None:
-    review_gate = report.get("reviewGate") if isinstance(report.get("reviewGate"), dict) else {}
-    return _text(review_gate.get("status"))
 
 
 def _access_denied_response(case_id: str, decision: dict[str, Any]) -> dict[str, Any]:

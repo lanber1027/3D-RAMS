@@ -25,11 +25,16 @@ def handle_invocation(payload: dict[str, Any] | None) -> dict[str, Any]:
         delivery = local_response.get("delivery") if isinstance(local_response, dict) else None
         agentcore_output = local_response.get("agentcoreOutput") if isinstance(local_response, dict) else None
         persistence = agentcore_output.get("persistence") if isinstance(agentcore_output, dict) else None
+        structured_report = agentcore_output.get("structuredReport") if isinstance(agentcore_output, dict) else None
+        review_metadata = _review_metadata(agentcore_output) if isinstance(agentcore_output, dict) else None
         return {
             "output": {
                 "caseId": local_response.get("caseId") if isinstance(local_response, dict) else None,
                 "localAsiOne": local_response,
                 "delivery": delivery,
+                "structuredReport": structured_report,
+                "reviewGate": review_metadata,
+                "reviewMetadata": review_metadata,
                 "run": run,
                 "persistence": persistence,
                 "reportStatus": delivery.get("status") if isinstance(delivery, dict) else "entry_pending",
@@ -50,11 +55,14 @@ def _handle_supervisor_invocation(payload: dict[str, Any] | None) -> dict[str, A
     report_status = _report_status(run)
     workflow_mode = _workflow_mode(run)
     structured_report = build_structured_report(run, report_status, workflow_mode)
+    review_metadata = _review_metadata({"structuredReport": structured_report})
     output = {
         "caseId": case_id,
         "reportStatus": report_status,
         "workflowMode": workflow_mode,
         "structuredReport": structured_report,
+        "reviewGate": review_metadata,
+        "reviewMetadata": review_metadata,
         "run": run,
     }
     output["persistence"] = persist_report(output)
@@ -65,6 +73,12 @@ def _handle_supervisor_invocation(payload: dict[str, Any] | None) -> dict[str, A
 
 def _is_local_asione_payload(payload: dict[str, Any]) -> bool:
     return bool(payload.get("localAsiOne") or payload.get("localAsiOneChat") or payload.get("entryMessage"))
+
+
+def _review_metadata(output: dict[str, Any]) -> dict[str, Any] | None:
+    report = output.get("structuredReport") if isinstance(output.get("structuredReport"), dict) else {}
+    review_gate = report.get("reviewGate") if isinstance(report.get("reviewGate"), dict) else None
+    return output.get("reviewMetadata") or output.get("reviewGate") or review_gate
 
 
 def _load_local_entry_flow():
