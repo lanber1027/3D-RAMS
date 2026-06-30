@@ -173,13 +173,20 @@ class VisualizationPayload(BaseModel):
 
 
 class ReviewGate(BaseModel):
-    status: Literal["blocked", "pending_independent_review", "passed"]
+    status: Literal["blocked", "passed", "passed_with_caveats", "review_required"]
+    decision: Literal["pass", "pass_with_caveats", "revise", "block"] | None = None
     safetyAllowed: bool
     safetyLevel: str
     requiresHumanReview: bool
     message: str
     triggeredRules: list[str] = Field(default_factory=list)
     reviewerNotes: list[str] = Field(default_factory=list)
+    reviewer: dict[str, Any] = Field(default_factory=dict)
+    issues: list[dict[str, Any]] = Field(default_factory=list)
+    requiredRevisions: list[str] = Field(default_factory=list)
+    caveats: list[str] = Field(default_factory=list)
+    revisionCount: int = 0
+    maxRevisionAttempts: int = 0
 
 
 class DataQuality(BaseModel):
@@ -205,7 +212,7 @@ class StructuredReport(BaseModel):
     reportType: Literal["3d-rams-site-review"] = "3d-rams-site-review"
     reportId: str
     caseId: str | None = None
-    status: Literal["blocked", "review_required", "review_passed"]
+    status: Literal["blocked", "review_required", "passed", "passed_with_caveats"]
     workflowMode: str
     intake: ReportIntake
     site: ReportSite

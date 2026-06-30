@@ -92,7 +92,7 @@ class LocalAsiOneEntryFlowTests(unittest.TestCase):
         self.assertFalse(response["needsClarification"])
         self.assertFalse(response["needsConfirmation"])
         self.assertIsNotNone(response["run"])
-        self.assertEqual(response["delivery"]["status"], "review_required")
+        self.assertEqual(response["delivery"]["status"], "passed_with_caveats")
         self.assertEqual(response["run"]["runtime"]["localAsiOneSubstitute"], True)
         trace_names = [step["name"] for step in response["run"]["trace"]]
         self.assertIn("entry_intake_parse", trace_names)

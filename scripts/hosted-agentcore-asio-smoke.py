@@ -12,7 +12,7 @@ from urllib import error, request
 
 
 REPORT_ACCESS_SCHEMA_VERSION = "3d-rams.report-access.v1"
-EXPECTED_REPORT_STATUS = "review_required"
+EXPECTED_REPORT_STATUS = "passed_with_caveats"
 EXPECTED_WORKFLOW_MODE = "cached_public_fixture"
 
 

@@ -6,6 +6,7 @@ from typing import Any
 
 from .agent import run_site_briefing
 from .report_store import load_report, persist_report
+from .review_gate import run_independent_review_loop
 from .structured_report import build_structured_report
 
 
@@ -47,9 +48,13 @@ def _handle_supervisor_invocation(payload: dict[str, Any] | None) -> dict[str, A
 
     run = run_site_briefing(request)
     case_id = run.get("caseId") or request.get("caseId")
-    report_status = "review_required" if run["safety"]["allowed"] else "blocked"
     workflow_mode = _workflow_mode(run)
-    structured_report = build_structured_report(run, report_status, workflow_mode)
+    draft_status = "review_required" if run["safety"]["allowed"] else "blocked"
+    draft_report = build_structured_report(run, draft_status, workflow_mode)
+    reviewed = run_independent_review_loop(run=run, draft_report=draft_report)
+    run = reviewed["run"]
+    structured_report = reviewed["structuredReport"]
+    report_status = reviewed["reportStatus"]
     output = {
         "caseId": case_id,
         "reportStatus": report_status,

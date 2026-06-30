@@ -374,7 +374,7 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertEqual(result["runtime"]["harnessOutputSchemaVersion"], HARNESS_OUTPUT_SCHEMA_VERSION)
         self.assertTrue(result["runtime"]["harnessContract"]["contractCompliant"])
         self.assertEqual(result["runtime"]["harnessContract"]["fallbackCount"], 0)
-        self.assertEqual(len(result["subagentOutputs"]), 6)
+        self.assertEqual(len(result["subagentOutputs"]), 5)
         self.assertEqual(
             result["runtime"]["harnessContract"]["observedSubagents"],
             [
@@ -383,7 +383,6 @@ class SiteBriefingAgentTests(unittest.TestCase):
                 "hazard_subagent",
                 "annotation_subagent",
                 "briefing_subagent",
-                "review_guardrail",
             ],
         )
         for output in result["subagentOutputs"]:

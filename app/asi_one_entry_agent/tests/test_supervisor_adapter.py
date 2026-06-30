@@ -134,7 +134,7 @@ class AgentVerseAdapterTests(unittest.TestCase):
         self.assertEqual(delivery["caseId"], "case_test_agentverse_001")
         self.assertEqual(delivery["conversationId"], "agentverse-session-id")
         self.assertEqual(delivery["caseUrl"], "/case/case_test_agentverse_001")
-        self.assertEqual(delivery["status"], "review_required")
+        self.assertEqual(delivery["status"], "passed_with_caveats")
         self.assertEqual(delivery["workflowMode"], "cached_public_fixture")
         self.assertEqual(delivery["customerSummary"]["title"], "8 Albert Embankment and land to the rear")
         self.assertTrue(delivery["customerSummary"]["summary"])
@@ -162,7 +162,7 @@ class AgentVerseAdapterTests(unittest.TestCase):
         self.assertEqual(calls[0]["payload"]["input"]["upstream"]["reportAccess"]["mode"], "asi_session")
         output = response["output"]
         self.assertEqual(output["caseId"], "case_test_agentverse_001")
-        self.assertEqual(output["reportStatus"], "review_required")
+        self.assertEqual(output["reportStatus"], "passed_with_caveats")
         self.assertEqual(output["workflowMode"], "cached_public_fixture")
         self.assertEqual(output["entryAgent"]["mode"], "cloud-supervisor-handoff")
         self.assertEqual(output["entryAgent"]["caseId"], "case_test_agentverse_001")

@@ -83,17 +83,19 @@ class AgentCoreInvocationTests(unittest.TestCase):
         self.assertTrue(all(step["output"]["caseId"] == "case_supervisor_test_001" for step in run["trace"] if isinstance(step.get("output"), dict)))
         self.assertEqual(output["persistence"]["mode"], "disabled")
         self.assertEqual(output["persistence"]["status"], "skipped")
-        self.assertEqual(output["reportStatus"], "review_required")
+        self.assertEqual(output["reportStatus"], "passed_with_caveats")
         self.assertEqual(output["workflowMode"], "cached_public_fixture")
         self.assertEqual(report["schemaVersion"], "0.1.0")
         self.assertEqual(report["reportType"], "3d-rams-site-review")
-        self.assertEqual(report["status"], "review_required")
+        self.assertEqual(report["status"], "passed_with_caveats")
         self.assertEqual(report["workflowMode"], "cached_public_fixture")
         self.assertEqual(report["site"]["label"], "8 Albert Embankment and land to the rear")
         self.assertTrue(report["findings"])
         self.assertTrue(report["visualization"]["annotations"])
         self.assertTrue(report["evidenceRegister"]["evidence"])
-        self.assertEqual(report["reviewGate"]["status"], "pending_independent_review")
+        self.assertEqual(report["reviewGate"]["status"], "passed_with_caveats")
+        self.assertEqual(report["reviewGate"]["decision"], "pass_with_caveats")
+        self.assertEqual(report["reviewGate"]["revisionCount"], 0)
         self.assertIn("reasoning", report)
         self.assertEqual(report["reasoning"]["mode"], "deterministic")
         self.assertTrue(report["reviewGate"]["reviewerNotes"])
@@ -213,7 +215,7 @@ class AgentCoreInvocationTests(unittest.TestCase):
         run = output["run"]
         self.assertFalse(entry["needsClarification"])
         self.assertFalse(entry["needsConfirmation"])
-        self.assertEqual(output["reportStatus"], "review_required")
+        self.assertEqual(output["reportStatus"], "passed_with_caveats")
         self.assertEqual(output["persistence"]["mode"], "disabled")
         self.assertEqual(entry["delivery"]["workflowMode"], "cached_public_fixture")
         self.assertEqual(run["runtime"]["localAsiOneSubstitute"], True)
@@ -273,7 +275,7 @@ class AgentCoreInvocationTests(unittest.TestCase):
         self.assertEqual(len(writes), 1)
         item = writes[0]
         self.assertEqual(item["caseId"], "case_store_test_001")
-        self.assertEqual(item["reportStatus"], "review_required")
+        self.assertEqual(item["reportStatus"], "passed_with_caveats")
         self.assertEqual(item["workflowMode"], "cached_public_fixture")
         self.assertEqual(item["schemaVersion"], "3d-rams.report-store.v1")
         self.assertEqual(item["recordType"], "case-correlated-report-evidence")
@@ -330,7 +332,7 @@ class AgentCoreInvocationTests(unittest.TestCase):
         lookup_output = lookup["output"]
 
         self.assertEqual(lookup_output["caseId"], "case_lookup_test_001")
-        self.assertEqual(lookup_output["reportStatus"], "review_required")
+        self.assertEqual(lookup_output["reportStatus"], "passed_with_caveats")
         self.assertEqual(lookup_output["persistence"]["status"], "loaded")
         self.assertEqual(lookup_output["reportAccess"]["status"], "authorized")
         self.assertEqual(lookup_output["reportAccess"]["reason"], "case_binding_authorized")
@@ -486,7 +488,7 @@ class AgentCoreInvocationTests(unittest.TestCase):
             table=FakeTable(),
             access_context=access,
         )
-        self.assertEqual(authorized["output"]["reportStatus"], "review_required")
+        self.assertEqual(authorized["output"]["reportStatus"], "passed_with_caveats")
         self.assertEqual(authorized["output"]["reportAccess"]["status"], "authorized")
         self.assertEqual(authorized["output"]["materialEvidenceSummary"]["items"][0]["materialId"], "asio_material_001")
 

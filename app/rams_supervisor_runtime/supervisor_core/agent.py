@@ -12,6 +12,7 @@ from rams_agent_tools.tools import (
     harness_for_group,
     ingest_material_references,
     normalize_request,
+    safety_gate,
     source_register,
     trace_step,
 )
@@ -154,13 +155,8 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
     trace.extend(_trace_steps(annotation_result.get("trace"), "annotation_subagent"))
     trace.extend(_trace_steps(briefing_result.get("trace"), "briefing_subagent"))
 
-    review_result = subagents.invoke_review(request, briefing)
-    subagent_outputs.append(review_result)
-    review_data = harness_data(review_result)
-    safety, safety_normalization_trace = _normalize_safety_payload(review_data.get("safety"))
-    trace.extend(_trace_steps(review_result.get("trace"), "review_guardrail"))
-    if safety_normalization_trace:
-        trace.append(safety_normalization_trace)
+    safety, safety_step = safety_gate(request, briefing)
+    trace.append(safety_step)
 
     sources = source_register(
         include_planning_fixture=request_summary["includePlanningFixture"],
@@ -264,58 +260,6 @@ def _correlate_trace(trace: list[dict[str, Any]], case_id: str) -> list[dict[str
             enriched["output"] = output
         correlated.append(enriched)
     return correlated
-
-
-def _normalize_safety_payload(value: Any) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    if isinstance(value, dict):
-        normalized = dict(value)
-        if "allowed" in normalized:
-            normalized["allowed"] = bool(normalized["allowed"])
-            normalized.setdefault("level", "review_required" if normalized["allowed"] else "blocked")
-            normalized.setdefault(
-                "message",
-                "Allowed as a non-certified pre-visit briefing that requires human review."
-                if normalized["allowed"]
-                else "Blocked by independent review.",
-            )
-            normalized.setdefault("triggeredRules", [])
-            normalized.setdefault("triggeredSources", {})
-            normalized.setdefault("requiresHumanReview", True)
-            normalized.setdefault(
-                "decisionId",
-                "safety-harness-review-required" if normalized["allowed"] else "safety-harness-blocked",
-            )
-            return normalized, None
-
-    raw_review = "" if value is None else str(value)
-    lower = raw_review.lower()
-    blocked = any(term in lower for term in ("block", "blocked", "reject", "rejected", "fail", "failed"))
-    normalized = {
-        "allowed": not blocked,
-        "level": "blocked" if blocked else "review_required",
-        "message": (
-            "Blocked by independent review output."
-            if blocked
-            else "Allowed as a non-certified pre-visit briefing that requires human review."
-        ),
-        "triggeredRules": ["review_harness_text_block"] if blocked else [],
-        "triggeredSources": {"reviewHarness": raw_review} if raw_review else {},
-        "requiresHumanReview": True,
-        "decisionId": "safety-harness-text-blocked" if blocked else "safety-harness-text-review-required",
-        "rawReview": raw_review,
-    }
-    return normalized, trace_step(
-        "normalize_review_safety",
-        "blocked" if blocked else "fallback",
-        "Supervisor normalized non-dict review Harness safety output.",
-        {
-            "allowed": normalized["allowed"],
-            "level": normalized["level"],
-            "rawReview": raw_review,
-        },
-        evidence_ids=["safety-policy"],
-        fallback_reason="review_harness_returned_non_dict_safety",
-    )
 
 
 def _trace_steps(value: Any, source: str) -> list[dict[str, Any]]:

@@ -156,14 +156,14 @@ AgentCore returns the standard runtime envelope:
 ```json
 {
   "output": {
-    "reportStatus": "review_required",
+    "reportStatus": "passed_with_caveats",
     "workflowMode": "cached_public_fixture",
     "run": {}
   }
 }
 ```
 
-`review_required` means the current demo safety boundary still requires human review. A future `review_passed` status should only be used after the independent review-agent loop from ADR 0002 is implemented and has passed.
+`passed_with_caveats` means the independent review gate allowed delivery while keeping caveats visible. `review_required` is reserved for max-revision or unresolved review outcomes.
 
 ## Adapter To Entry Agent
 
@@ -172,7 +172,7 @@ The adapter returns a delivery payload suitable for ASI:ONE/AgentVerse:
 ```json
 {
   "conversationId": "agentverse-session-id",
-  "status": "review_required",
+  "status": "passed_with_caveats",
   "workflowMode": "cached_public_fixture",
   "customerSummary": {
     "title": "Lambeth Thames public fixture",

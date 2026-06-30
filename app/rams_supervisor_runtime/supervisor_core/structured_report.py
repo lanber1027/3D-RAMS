@@ -255,13 +255,14 @@ def _build_findings(run: dict[str, Any]) -> list[ReportFinding]:
 def _build_review_gate(safety: dict[str, Any], reasoning: dict[str, Any]) -> ReviewGate:
     allowed = bool(safety.get("allowed"))
     reviewer_notes = (
-        ["Independent review agent has not been implemented in this prototype."]
+        ["Draft report is awaiting independent review."]
         if allowed
         else ["Safety gate blocked this output before independent review."]
     )
     reviewer_notes.extend(_string_list(reasoning.get("reviewQuestions")))
     return ReviewGate(
-        status="pending_independent_review" if allowed else "blocked",
+        status="review_required" if allowed else "blocked",
+        decision="revise" if allowed else "block",
         safetyAllowed=allowed,
         safetyLevel=str(safety.get("level") or "unknown"),
         requiresHumanReview=bool(safety.get("requiresHumanReview", True)),
@@ -387,7 +388,7 @@ def _has_available_source(sources: list[dict[str, Any]], token: str) -> bool:
 
 
 def _report_status(value: str) -> str:
-    if value in {"blocked", "review_required", "review_passed"}:
+    if value in {"blocked", "review_required", "passed", "passed_with_caveats"}:
         return value
     return "review_required"
 

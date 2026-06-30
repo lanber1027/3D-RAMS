@@ -3,7 +3,7 @@
   "reportType": "3d-rams-site-review",
   "reportId": "demo1-local-run",
   "caseId": "case_demo_fixture_001",
-  "status": "review_required",
+  "status": "passed_with_caveats",
   "workflowMode": "cached_public_fixture",
   "intake": {
     "caseId": "case_demo_fixture_001",
@@ -180,15 +180,27 @@
     "evidence": []
   },
   "reviewGate": {
-    "status": "pending_independent_review",
+    "status": "passed_with_caveats",
+    "decision": "pass_with_caveats",
     "safetyAllowed": true,
     "safetyLevel": "allowed",
     "requiresHumanReview": true,
-    "message": "Allowed as a non-certified pre-visit briefing that requires human review.",
+    "message": "Independent review passed the report with caveats visible to the user.",
     "triggeredRules": [],
     "reviewerNotes": [
-      "Independent review agent has not been implemented in this prototype."
-    ]
+      "Independent review passed the report with caveats visible to the user."
+    ],
+    "reviewer": {
+      "name": "review_guardrail",
+      "mode": "deterministic"
+    },
+    "issues": [],
+    "requiredRevisions": [],
+    "caveats": [
+      "Candidate findings require competent human review before use."
+    ],
+    "revisionCount": 0,
+    "maxRevisionAttempts": 2
   },
   "dataQuality": {
     "dataMode": "cached-public-fixture",

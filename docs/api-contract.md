@@ -134,7 +134,7 @@ The response keeps the AgentCore output envelope:
 {
   "output": {
     "caseId": "case_demo_fixture_001",
-    "reportStatus": "review_required",
+    "reportStatus": "passed_with_caveats",
     "workflowMode": "cached_public_fixture",
     "persistence": {
       "mode": "dynamodb",
@@ -156,7 +156,7 @@ Important `output.structuredReport` fields:
 | --- | --- |
 | `schemaVersion` | Structural report schema version. |
 | `caseId` | Entry-agent generated correlation id, when present. It becomes the DynamoDB partition key only when `RAMS_REPORT_STORE_TABLE` is configured. |
-| `status` | `blocked`, `review_required`, or future `review_passed`. |
+| `status` | `passed`, `passed_with_caveats`, `review_required`, or `blocked`. |
 | `intake` | Confirmed user intake and optional upstream AgentVerse metadata. |
 | `materialIngestion` | Safe material-ingestion status, accepted/skipped references, citations, and evidence/source ids. |
 | `site` | Resolved site label, coordinate, authority, confidence, and source ids. |
@@ -166,7 +166,7 @@ Important `output.structuredReport` fields:
 | `visualization` | Frontend-ready scene config and map/3D annotations. |
 | `evidenceRegister` | Source register and evidence register used by findings and sections. |
 | `reasoning` | Inspectable supervisor evidence-use decisions, report-fit status, gaps, conflicts, and review questions. |
-| `reviewGate` | Current safety/review state. It is `pending_independent_review` until the independent review agent exists. |
+| `reviewGate` | Independent review output with decision, status, issues, caveats, and bounded revision count. |
 | `dataQuality` | Completeness flags, warnings, and gaps surfaced by fixture fallback, disabled data, or limitations. |
 | `externalSignals` | Placeholder for future Tavily/open-web signals. Current prototype marks this as `not_configured`. |
 | `trace` | Ordered tool timeline for debugging and evidence inspection. |
