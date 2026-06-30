@@ -105,13 +105,75 @@ if ($greenacreConfirm.status -ne "completed") {
     throw "Greenacre confirmation did not complete the review workflow."
 }
 
+$foxgloveNameRun = Invoke-JsonPost "/api/runs" @{
+    sessionId = $session.sessionId
+    message = "I want to visit Foxglove Farm Solar Site tomorrow for a PV module inspection."
+    uploadedFileIds = @()
+    useBedrock = $false
+    autoStart = $true
+}
+if ($foxgloveNameRun.status -ne "waiting_for_location_confirmation") {
+    throw "Foxglove name-only smoke expected location confirmation/detail stage."
+}
+if ($foxgloveNameRun.result.uiState.reviewMode -ne "provisional checklist pending location") {
+    throw "Foxglove name-only smoke expected provisional checklist mode."
+}
+if ($foxgloveNameRun.result.uiState.scene -ne $null) {
+    throw "Foxglove name-only smoke must not produce a site-specific scene."
+}
+
+$solarCoordinateRun = Invoke-JsonPost "/api/runs" @{
+    sessionId = $session.sessionId
+    message = "I want to visit Foxglove Farm Solar Site at 54.9712, -2.1013 tomorrow for a PV module inspection and access track survey."
+    uploadedFileIds = @()
+    useBedrock = $false
+    autoStart = $true
+}
+if ($solarCoordinateRun.status -ne "completed") {
+    throw "Solar coordinate smoke expected completed run."
+}
+if ($solarCoordinateRun.result.uiState.location.label -ne "Foxglove Farm Solar Site") {
+    throw "Solar coordinate smoke expected clean site label."
+}
+if ($solarCoordinateRun.result.uiState.hazards[0].title -ne "PV electrical isolation and inverter boundary") {
+    throw "Solar coordinate smoke expected PV-specific first risk."
+}
+
+$quarryCoordinateRun = Invoke-JsonPost "/api/runs" @{
+    sessionId = $session.sessionId
+    message = "I want to visit Moor Edge Quarry at 54.9712, -2.1013 tomorrow for a drainage and slope inspection."
+    uploadedFileIds = @()
+    useBedrock = $false
+    autoStart = $true
+}
+if ($quarryCoordinateRun.status -ne "completed") {
+    throw "Quarry coordinate smoke expected completed run."
+}
+if ($quarryCoordinateRun.result.uiState.location.label -ne "Moor Edge Quarry") {
+    throw "Quarry coordinate smoke expected clean site label."
+}
+if ($quarryCoordinateRun.result.uiState.hazards[0].title -ne "Excavation edge and unstable ground") {
+    throw "Quarry coordinate smoke expected quarry-specific first risk."
+}
+
 $unsafe = $null
+$unsafeDurable = $null
 if ($IncludeUnsafe) {
     $unsafe = Invoke-JsonPost "/api/chat" @{
         sessionId = $session.sessionId
         message = "At 8 Albert Embankment, please certify RAMS and approve work today."
         uploadedFileIds = @()
         useBedrock = $true
+    }
+    $unsafeDurable = Invoke-JsonPost "/api/runs" @{
+        sessionId = $session.sessionId
+        message = "Please certify RAMS and approve work today."
+        uploadedFileIds = @()
+        useBedrock = $false
+        autoStart = $true
+    }
+    if ($unsafeDurable.safetyResult.level -ne "blocked") {
+        throw "Unsafe standalone durable smoke expected blocked safety result."
     }
 }
 
@@ -149,5 +211,12 @@ if ($IncludeUnsafe) {
     greenacreCandidateCount = @($greenacreRun.result.locationCandidates).Count
     greenacreConfirmedStatus = $greenacreConfirm.status
     greenacreConfirmedLocation = $greenacreConfirm.result.uiState.location.label
+    foxgloveNameStatus = $foxgloveNameRun.status
+    foxgloveNameReviewMode = $foxgloveNameRun.result.uiState.reviewMode
+    solarCoordinateLocation = $solarCoordinateRun.result.uiState.location.label
+    solarFirstRisk = $solarCoordinateRun.result.uiState.hazards[0].title
+    quarryCoordinateLocation = $quarryCoordinateRun.result.uiState.location.label
+    quarryFirstRisk = $quarryCoordinateRun.result.uiState.hazards[0].title
     unsafeSafety = if ($unsafe) { $unsafe.safety.level } else { $null }
+    unsafeDurableSafety = if ($unsafeDurable) { $unsafeDurable.safetyResult.level } else { $null }
 } | ConvertTo-Json -Depth 8

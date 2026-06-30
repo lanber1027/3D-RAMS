@@ -153,13 +153,17 @@ def execute_durable_run(run_id: str, config: RuntimeConfig) -> None:
         ]
         clarification: list[str] = []
         location_resolution = None
+        safety_block = None
     else:
-        request, parse_trace, clarification, location_resolution = _parse_message_to_request(
+        request, parse_trace, clarification, location_resolution, safety_block = _parse_message_to_request(
             run["request"]["message"],
             run["request"]["uploadedFileIds"],
             bool(run["request"]["useBedrock"]),
         )
     _merge_trace(run_id, parse_trace)
+    if safety_block:
+        _finish_safety_blocked(run_id, safety_block, started, config)
+        return
     if location_resolution:
         _finish_location_confirmation(run_id, location_resolution, clarification, started, config)
         return
@@ -630,12 +634,13 @@ def _finish_location_confirmation(
             "Please provide a postcode, OS grid reference, latitude/longitude, nearest road/town, or local authority."
         )
         status = "waiting_for_location_confirmation"
-    safety = {"allowed": True, "level": "needs_input", "message": "No briefing generated until the site location is confirmed."}
+    safety = {"allowed": True, "level": "needs_input", "message": "No site-specific briefing generated until the site location is confirmed."}
+    provisional_risks = location_resolution.get("provisionalRisks", [])
     ui_state = {
         "location": None,
         "scene": None,
         "annotations": [],
-        "hazards": [],
+        "hazards": provisional_risks,
         "evidence": [],
         "sources": [],
         "briefing": None,
@@ -643,6 +648,7 @@ def _finish_location_confirmation(
         "trace": trace,
         "architecture": None,
         "locationResolution": location_resolution,
+        "reviewMode": "provisional checklist pending location" if provisional_risks else "location pending",
     }
     runtime = {
         "hostedProductMode": True,
@@ -684,6 +690,85 @@ def _finish_location_confirmation(
         result=result,
         runtime=runtime,
         locationResolution=location_resolution,
+    )
+    _record_session_run_summary(run_id, result, config)
+
+
+def _finish_safety_blocked(
+    run_id: str,
+    safety_block: dict[str, Any],
+    started: float,
+    config: RuntimeConfig,
+) -> None:
+    run = get_run_record(run_id)
+    trace = [
+        *run.get("steps", []),
+        *list(run.get("partialUiState", {}).get("trace") or []),
+    ]
+    safety = {
+        "allowed": False,
+        "level": "blocked",
+        "message": safety_block["message"],
+        "triggeredRules": safety_block.get("triggeredRules", []),
+        "requiresHumanReview": True,
+    }
+    briefing = {
+        "headline": "Request blocked by safety boundary.",
+        "summary": [safety_block["message"]],
+        "priority_checks": [],
+        "before_site_visit": [],
+        "limitations": ["3D-RAMS cannot certify RAMS, approve work, or provide emergency guidance."],
+    }
+    ui_state = {
+        "location": None,
+        "scene": None,
+        "annotations": [],
+        "hazards": [],
+        "evidence": [],
+        "sources": [],
+        "briefing": briefing,
+        "safety": safety,
+        "trace": trace,
+        "architecture": None,
+        "locationResolution": None,
+        "reviewMode": "safety blocked",
+    }
+    runtime = {
+        "hostedProductMode": True,
+        "durableRunApi": True,
+        "briefingMode": "not-run",
+        "activeAgentMode": "safety-gate",
+        "modelCallCount": 0,
+        "latencyMs": int((time.perf_counter() - started) * 1000),
+    }
+    result = {
+        "sessionId": run["sessionId"],
+        "runId": run_id,
+        "assistantMessage": safety_block["message"],
+        "needsClarification": False,
+        "clarifyingQuestions": [],
+        "agent": _agent_runtime_state(),
+        "uiState": ui_state,
+        "runtime": runtime,
+        "trace": trace,
+        "evidence": [],
+        "scene": None,
+        "annotations": [],
+        "briefing": briefing,
+        "safety": safety,
+        "fallback": {"status": "blocked", "reason": safety_block["message"]},
+        "modelCalls": [],
+        "tokenUsage": None,
+    }
+    update_run(
+        run_id,
+        status="completed",
+        currentStep="safety_gate",
+        partialUiState=ui_state,
+        finalUiState=ui_state,
+        safetyResult=safety,
+        result=result,
+        runtime=runtime,
     )
     _record_session_run_summary(run_id, result, config)
 

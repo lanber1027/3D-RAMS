@@ -22,7 +22,10 @@ flowchart LR
     APIGW --> Lambda["Lambda FastAPI backend"]
     Lambda --> Session["Shared-code session + tester alias"]
     Lambda --> Agent["FieldBrief Agent Orchestrator"]
-    Agent --> Tools["Allowlisted tools"]
+    Agent --> Intent["Intent and safety parser"]
+    Intent --> LocationGate{"Location evidence trusted?"}
+    LocationGate -->|"confirmed or coordinate/postcode"| Tools["Allowlisted tools"]
+    LocationGate -->|"name-only"| Provisional["Provisional checklist pending location"]
     Tools --> Location["Location resolver"]
     Tools --> Planning["Planning/context adapter"]
     Tools --> Weather["Weather adapter"]
@@ -30,7 +33,7 @@ flowchart LR
     Agent --> Bedrock["Amazon Bedrock Claude 3.7 Sonnet"]
     Lambda --> TraceStore["DynamoDB session trace"]
     Lambda --> Logs["CloudWatch structured logs"]
-    Lambda --> UIState["Chat, 3D scene, evidence, trace, safety"]
+    Lambda --> UIState["Chat, 3D scene, evidence, trace, safety, review mode"]
     UIState --> UI
 ```
 
@@ -156,6 +159,8 @@ sequenceDiagram
 ```
 
 The hosted MVP runs Bedrock server-side through Lambda when access-code validation succeeds. Local and CI modes can still run without Bedrock, and deterministic briefing remains the fallback. The hosted planner/synthesis path is capped at 2 model calls per run. The default UI uses the cached `public-lambeth-thames` pack anchored on 8 Albert Embankment. Runtime does not call live Planning Data, OpenStreetMap, Environment Agency, Lambeth, TfL, Google, or OS services.
+
+V3.1 adds a pre-tool intent and location-evidence gate. The parser extracts clean site label, coordinate, postcode/outcode, nearest-town clue, site/activity type, visit date, and unsafe certification/approval intent. The resolver is fixture-first plus server-side Postcodes.io for postcode/outcode clues. Broad site-name web geocoding is deferred; the system must not ask the LLM to invent coordinates. Name-only random sites can show a clearly labelled provisional checklist, but site-specific scene/evidence/briefing output requires confirmed location evidence.
 
 ## LLM-First Control Surface
 

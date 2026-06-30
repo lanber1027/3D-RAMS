@@ -110,6 +110,62 @@ class DurableRunApiTests(unittest.TestCase):
         self.assertEqual(resolver_step["status"], "warning")
         self.assertEqual(resolver_step["output"]["candidateCount"], 0)
 
+    def test_durable_run_name_only_returns_provisional_checklist_without_review_tools(self):
+        with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None, DURABLE_RUN_PROCESS_INLINE="true"):
+            session = self._session()
+            response = self._run(
+                session["sessionId"],
+                "I want to visit Foxglove Farm Solar Site near Hexham tomorrow for a PV module inspection and access track survey. Please prepare a pre-visit RAMS-style review pack.",
+            )
+
+        self.assertEqual(response.status_code, 202)
+        result = response.json()
+        self.assertEqual(result["status"], "waiting_for_location_confirmation")
+        self.assertEqual(result["modelCallsUsed"], 0)
+        self.assertIsNone(result["result"]["scene"])
+        self.assertEqual(result["result"]["evidence"], [])
+        self.assertEqual(result["result"]["uiState"]["reviewMode"], "provisional checklist pending location")
+        hazards = result["result"]["uiState"]["hazards"]
+        self.assertTrue(any(hazard["title"] == "PV electrical isolation and inverter interface" for hazard in hazards))
+        self.assertIn("near Hexham", " ".join(result["result"]["clarifyingQuestions"]))
+
+    def test_durable_run_coordinate_site_profiles_are_activity_specific(self):
+        with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None, DURABLE_RUN_PROCESS_INLINE="true"):
+            session = self._session()
+            solar = self._run(
+                session["sessionId"],
+                "I want to visit Foxglove Farm Solar Site at 54.9712, -2.1010 tomorrow for a PV module inspection and access track survey.",
+            ).json()
+            quarry = self._run(
+                session["sessionId"],
+                "I want to visit Moor Edge Quarry at 53.3600, -1.9300 tomorrow for a drainage and slope inspection.",
+            ).json()
+
+        self.assertEqual(solar["status"], "completed")
+        self.assertEqual(quarry["status"], "completed")
+        self.assertEqual(solar["result"]["uiState"]["location"]["label"], "Foxglove Farm Solar Site")
+        self.assertEqual(quarry["result"]["uiState"]["location"]["label"], "Moor Edge Quarry")
+        solar_titles = {hazard["title"] for hazard in solar["result"]["uiState"]["hazards"]}
+        quarry_titles = {hazard["title"] for hazard in quarry["result"]["uiState"]["hazards"]}
+        self.assertEqual(solar["result"]["uiState"]["hazards"][0]["title"], "PV electrical isolation and inverter boundary")
+        self.assertEqual(quarry["result"]["uiState"]["hazards"][0]["title"], "Excavation edge and unstable ground")
+        self.assertIn("PV electrical isolation and inverter boundary", solar_titles)
+        self.assertIn("Excavation edge and unstable ground", quarry_titles)
+        self.assertNotEqual(solar_titles, quarry_titles)
+
+    def test_durable_run_standalone_unsafe_request_blocks_before_location_parse(self):
+        with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None, DURABLE_RUN_PROCESS_INLINE="true"):
+            session = self._session()
+            response = self._run(session["sessionId"], "Please certify RAMS and approve work today.")
+
+        self.assertEqual(response.status_code, 202)
+        result = response.json()
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["currentStep"], "safety_gate")
+        self.assertEqual(result["modelCallsUsed"], 0)
+        self.assertEqual(result["safetyResult"]["level"], "blocked")
+        self.assertFalse(result["result"]["needsClarification"])
+
     def test_durable_run_confirms_cached_location_candidate_before_review_workflow(self):
         with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None, DURABLE_RUN_PROCESS_INLINE="true"):
             session = self._session()

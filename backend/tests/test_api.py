@@ -2,6 +2,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 
@@ -275,6 +276,80 @@ class ApiContractTests(unittest.TestCase):
         self.assertAlmostEqual(result["uiState"]["location"]["longitude"], -3.4567)
         self.assertIsNone(result["runtime"]["fixturePack"])
         self.assertEqual(result["runtime"]["fixturePackMode"], "synthetic-default")
+
+    def test_chat_endpoint_coordinate_site_keeps_clean_label_and_prompt_risks(self):
+        with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None):
+            session = self.client.post("/api/session/start", json={"testerAlias": "qa"}).json()
+            response = self.client.post(
+                "/api/chat",
+                json={
+                    "sessionId": session["sessionId"],
+                    "message": "I want to visit Foxglove Farm Solar Site at 54.9712, -2.1010 tomorrow for a PV module inspection and access track survey.",
+                    "useBedrock": False,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.json()
+        hazards = result["uiState"]["hazards"]
+        self.assertEqual(result["uiState"]["location"]["label"], "Foxglove Farm Solar Site")
+        self.assertEqual(hazards[0]["title"], "PV electrical isolation and inverter boundary")
+        self.assertTrue(any(hazard["title"] == "PV electrical isolation and inverter boundary" for hazard in hazards))
+        self.assertTrue(any(hazard.get("dataMode") == "provisional-from-user-description" for hazard in hazards))
+
+    def test_chat_endpoint_postcode_prompt_returns_source_labelled_candidate(self):
+        fake_response = Mock()
+        fake_response.raise_for_status.return_value = None
+        fake_response.json.return_value = {
+            "status": 200,
+            "result": {
+                "postcode": "SW1A 1AA",
+                "outcode": "SW1A",
+                "latitude": 51.501,
+                "longitude": -0.141,
+                "admin_district": "Westminster",
+                "admin_ward": "St James's",
+            },
+        }
+        with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None), patch("app.location_resolver.httpx.get", return_value=fake_response):
+            session = self.client.post("/api/session/start", json={"testerAlias": "qa"}).json()
+            response = self.client.post(
+                "/api/chat",
+                json={
+                    "sessionId": session["sessionId"],
+                    "message": "I want to visit Foxglove Farm Solar Site at SW1A 1AA tomorrow for a survey.",
+                    "useBedrock": False,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.json()
+        self.assertTrue(result["needsLocationConfirmation"])
+        self.assertEqual(result["nextStage"], "confirm_location")
+        self.assertEqual(len(result["locationCandidates"]), 1)
+        candidate = result["locationCandidates"][0]
+        self.assertEqual(candidate["source"], "postcodes.io/postcodes")
+        self.assertEqual(candidate["dataMode"], "source-labelled-location")
+        self.assertEqual(candidate["countyOrAuthority"], "Westminster")
+
+    def test_chat_endpoint_standalone_certification_request_is_blocked(self):
+        with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None):
+            session = self.client.post("/api/session/start", json={"testerAlias": "qa"}).json()
+            response = self.client.post(
+                "/api/chat",
+                json={
+                    "sessionId": session["sessionId"],
+                    "message": "Please certify RAMS and approve work today.",
+                    "useBedrock": False,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.json()
+        self.assertFalse(result["safety"]["allowed"])
+        self.assertEqual(result["safety"]["level"], "blocked")
+        self.assertEqual(result["runtime"]["activeAgentMode"], "safety-gate")
+        self.assertFalse(result["needsClarification"])
 
     def test_chat_endpoint_runs_hosted_agent_contract_with_public_fixture(self):
         with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None):

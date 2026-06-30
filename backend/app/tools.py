@@ -176,6 +176,17 @@ def source_register(
                 "awsMapping": "S3 evidence object and Bedrock extraction input",
             }
         )
+        sources.append(
+            {
+                "id": "provisional-from-user-description",
+                "label": "Prompt-derived provisional risk profile",
+                "kind": "risk_profile",
+                "status": "provisional",
+                "origin": "User-submitted site type and visit activity",
+                "trustBoundary": "User input, not source evidence",
+                "awsMapping": "DynamoDB run metadata plus CloudWatch trace",
+            }
+        )
     return sources
 
 
@@ -377,6 +388,7 @@ def extract_hazard_notes(
     planning_text: str | None,
     features: list[dict[str, Any]],
     fixture_pack: dict[str, Any] | None = None,
+    site_intent: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if fixture_pack:
         hazards = fixture_pack.get("hazards", [])
@@ -436,12 +448,19 @@ def extract_hazard_notes(
                     }
                 )
 
+    prompt_hazards = _prompt_derived_hazards(site_intent)
+    if prompt_hazards:
+        hazards = prompt_hazards + hazards
+
     return hazards, trace_step(
         "extract_hazard_notes",
         "ok" if hazards else "warning",
-        "Extracted hazard notes from deterministic rules over fixture data.",
-        {"hazard_count": len(hazards)},
-        source_ids=[geo_source_id, "planning-fixture"],
+        "Extracted hazard notes from fixture data and prompt-derived provisional risk profiles.",
+        {
+            "hazard_count": len(hazards),
+            "provisional_count": len([hazard for hazard in hazards if hazard.get("dataMode") == "provisional-from-user-description"]),
+        },
+        source_ids=[geo_source_id, "planning-fixture", "provisional-from-user-description"],
         evidence_ids=["geo-fixture", "planning-fixture"] if planning_text else ["geo-fixture"],
     )
 
@@ -551,9 +570,20 @@ def generate_site_brief(
                 "why_it_matters": "Lets the agent demonstrate planning-document hazard extraction without scraping a live LPA portal.",
             }
         )
+    if any(hazard.get("dataMode") == "provisional-from-user-description" for hazard in hazards):
+        evidence.append(
+            {
+                "id": "provisional-from-user-description",
+                "title": "Prompt-derived provisional risk profile",
+                "source": "Submitted site type and visit activity",
+                "status": "provisional",
+                "why_it_matters": "Adds site/activity-specific review prompts before live evidence sources are connected.",
+            }
+        )
 
     limitations = [
         "Demo1 uses synthetic fixtures and must not be treated as certified RAMS.",
+        "Prompt-derived risks are provisional and are not evidence-backed site findings.",
         "All hazards need competent human review and current source checks before site work.",
         "Imagery-derived or inferred features are labelled low confidence.",
     ]
@@ -770,6 +800,51 @@ def safety_gate(request: dict[str, Any], briefing: dict[str, Any]) -> tuple[dict
         },
         evidence_ids=["safety-policy"],
     )
+
+
+def _prompt_derived_hazards(site_intent: dict[str, Any] | None) -> list[dict[str, Any]]:
+    site_intent = site_intent or {}
+    site_types = set(site_intent.get("siteTypes", []))
+    activities = set(site_intent.get("activities", []))
+    hazards: list[dict[str, Any]] = []
+    confidence = "medium" if site_intent.get("coordinate") or site_intent.get("postcode") else "low"
+
+    def add(key: str, title: str, category: str, note: str) -> None:
+        hazards.append(
+            {
+                "id": f"prompt-{key}",
+                "title": title,
+                "category": category,
+                "source": "user description",
+                "sourceIds": ["provisional-from-user-description"],
+                "evidenceIds": [],
+                "confidence": confidence,
+                "note": note,
+                "dataMode": "provisional-from-user-description",
+            }
+        )
+
+    if "solar" in site_types:
+        add("pv-electrical", "PV electrical isolation and inverter boundary", "electrical", "Confirm isolation state, inverter/skid access, cable routes, and any energised-equipment boundaries.")
+        add("pv-module-rows", "PV module row trip and access constraints", "access", "Review row spacing, low-level obstructions, cable trays, vegetation, and safe walking routes.")
+    if "quarry" in site_types:
+        add("quarry-edge", "Excavation edge and unstable ground", "ground", "Confirm exclusion zones, edge protection, loose faces, slope stability, and stop-work criteria.")
+        add("quarry-plant", "Heavy plant and haul-road interface", "traffic", "Check plant movement, visibility, reversing controls, haul roads, and pedestrian segregation.")
+    if {"substation", "bess"} & site_types:
+        add("high-energy-assets", "High-energy asset access boundary", "electrical", "Confirm permits, isolation, arc-flash/electrical boundaries, emergency contacts, and competent supervision.")
+    if "roof" in site_types:
+        add("roof-work", "Work-at-height and fragile roof controls", "work_at_height", "Confirm access, edge protection, rooflights, weather limits, rescue plan, and load restrictions.")
+    if "rural_field" in site_types:
+        add("rural-field", "Rural access, livestock, and soft-ground controls", "access", "Check gates, livestock, parking, soft ground, remote communications, and lone-working arrangements.")
+    if "drainage_slope" in activities:
+        add("drainage-slope", "Drainage, slope, and slip conditions", "ground", "Review recent rain, ditches, culverts, gradient, unstable banks, and safe inspection positions.")
+    if "access_track" in activities:
+        add("access-track", "Access track, gate, bridge, and culvert constraints", "access", "Check track width, gate width, bridge limits, culvert condition, vehicle suitability, and turning areas.")
+    if "delivery" in activities:
+        add("delivery-interface", "Delivery, unloading, and lifting interface", "traffic", "Confirm delivery route, banksman need, unloading area, overhead lines, exclusion zones, and public interface.")
+    if "inspection" in activities or "survey" in activities:
+        add("walkover", "Walkover survey and lone-working controls", "survey", "Confirm communication, welfare, weather, route plan, emergency contact, and abort criteria.")
+    return hazards[:8]
 
 
 def architecture_snapshot(

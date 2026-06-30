@@ -157,6 +157,9 @@ function SceneViewer({ scene, annotations, location }) {
       <div className="map-caption">
         <strong>{location?.label || "Selected site"}</strong>
         <span>{toList(annotations).length} mapped risk marker(s)</span>
+        {(location?.confidence || location?.dataMode) && (
+          <small>{[location.confidence, location.dataMode].filter(Boolean).join(" - ")}</small>
+        )}
       </div>
     </div>
   );
@@ -255,7 +258,7 @@ function ChatPanel({ messages, prompt, setPrompt, onSend, loading, uploads, onMo
   );
 }
 
-function RiskCards({ hazards, briefing }) {
+function RiskCards({ hazards, briefing, reviewMode }) {
   const items = toList(hazards).slice(0, 6);
   const confidenceLabel = (confidence) => `${confidence || "review"} confidence`;
   return (
@@ -264,13 +267,19 @@ function RiskCards({ hazards, briefing }) {
         <AlertTriangle size={18} />
         <h2>Risk Review</h2>
       </div>
+      {reviewMode && (
+        <div className={`review-mode ${reviewMode.includes("provisional") ? "provisional" : ""}`}>
+          {reviewMode}
+        </div>
+      )}
       <div className="risk-grid">
         {items.length ? (
           items.map((hazard) => (
             <article key={hazard.id || hazard.title}>
               <strong>{hazard.title}</strong>
               <em className={`status ${hazard.confidence || "warning"}`}>{hazard.confidence || "review"}</em>
-              <p>{hazard.reason || hazard.summary || "Review this item before the site visit."}</p>
+              <p>{hazard.reason || hazard.summary || hazard.note || "Review this item before the site visit."}</p>
+              <small>{hazard.dataMode || hazard.source || "source pending"}</small>
             </article>
           ))
         ) : (
@@ -319,7 +328,7 @@ function LocationConfirmationPanel({ resolution, onConfirm, onReject, onManual, 
       <p className="confirmation-copy">
         {candidates.length
           ? "The agent found source-labelled candidate locations. Confirm one before map, evidence, risk, or briefing tools run."
-          : "The agent searched the cached resolver but did not find a reliable candidate. Provide stronger location detail to continue."}
+          : "The agent searched the cached/source resolver but did not find a reliable candidate. Any risk prompts shown below are provisional and not site-specific evidence."}
       </p>
       {candidates.length > 0 ? (
         <div className="candidate-grid">
@@ -361,7 +370,7 @@ function LocationConfirmationPanel({ resolution, onConfirm, onReject, onManual, 
           ))}
         </div>
       ) : (
-        <p className="empty-copy">No reliable cached/public candidate was found for {resolution.siteName}. The review workflow has not started.</p>
+        <p className="empty-copy">No reliable cached/public candidate was found for {resolution.siteName}. The site-specific review workflow has not started.</p>
       )}
       <button className="secondary" type="button" onClick={onManual} disabled={loading}>
         Enter coordinates manually
@@ -475,6 +484,7 @@ function App() {
   const accessLabel = session?.accessLabel || "not started";
   const runtime = run?.runtime || {};
   const locationResolution = run?.locationResolution || ui.locationResolution || null;
+  const reviewMode = ui.reviewMode || (runStatus && ["queued", "running"].includes(runStatus.status) ? "new run in progress" : null);
   const safetyTone = ui.safety?.allowed === false ? "blocked" : ui.safety?.level === "needs_input" ? "warning" : "allowed";
 
   async function startSession(payload) {
@@ -503,6 +513,31 @@ function App() {
     const userMessage = { id: `user-${Date.now()}`, role: "user", text: prompt.trim() };
     setMessages((current) => [...current, userMessage]);
     setPrompt("");
+    setRun({
+      runId: "pending",
+      assistantMessage: "Run queued.",
+      uiState: {
+        location: null,
+        scene: null,
+        annotations: [],
+        hazards: [],
+        evidence: [],
+        sources: [],
+        briefing: null,
+        safety: { allowed: true, level: "running", message: "New run is executing." },
+        trace: [],
+        architecture: null,
+        locationResolution: null,
+        reviewMode: "new run in progress",
+      },
+      runtime: { activeAgentMode: "queued", briefingMode: "not-run" },
+      trace: [],
+      evidence: [],
+      scene: null,
+      annotations: [],
+      briefing: null,
+      safety: { allowed: true, level: "running", message: "New run is executing." },
+    });
     setLoading(true);
     setError("");
     try {
@@ -759,7 +794,7 @@ function App() {
       />
 
       <section className="insight-grid">
-        <RiskCards hazards={ui.hazards} briefing={ui.briefing} />
+        <RiskCards hazards={ui.hazards} briefing={ui.briefing} reviewMode={reviewMode} />
         <EvidenceAndTrace evidence={ui.evidence} trace={ui.trace} safety={ui.safety} runtime={runtime} runStatus={runStatus} />
       </section>
     </main>

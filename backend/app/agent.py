@@ -202,7 +202,12 @@ def _run_core_tool_chain(
     )
     trace.append(step)
 
-    hazards, step = extract_hazard_notes(planning_text, features, fixture_pack=fixture_pack)
+    hazards, step = extract_hazard_notes(
+        planning_text,
+        features,
+        fixture_pack=fixture_pack,
+        site_intent=request.get("siteIntent"),
+    )
     trace.append(step)
 
     annotations, step = create_annotations(location, hazards)

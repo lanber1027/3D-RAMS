@@ -116,6 +116,7 @@ def _extract_hazard_notes(context: dict[str, Any]) -> dict[str, Any]:
         context.get("planningText"),
         context["features"],
         fixture_pack=context.get("fixturePack"),
+        site_intent=context["request"].get("siteIntent"),
     )
     context["hazards"] = hazards
     return {"hazards": hazards, "trace": trace}
@@ -123,18 +124,26 @@ def _extract_hazard_notes(context: dict[str, Any]) -> dict[str, Any]:
 
 def _rank_risks(context: dict[str, Any]) -> dict[str, Any]:
     _require(context, "hazards", "rank_risks")
-    ranked = sorted(
-        context["hazards"],
-        key=lambda hazard: (hazard.get("confidence") == "low", hazard.get("title", "")),
-    )
+    indexed_hazards = list(enumerate(context["hazards"]))
+    ranked = [
+        hazard
+        for _, hazard in sorted(
+            indexed_hazards,
+            key=lambda item: (
+                item[1].get("dataMode") != "provisional-from-user-description",
+                item[1].get("confidence") == "low",
+                item[0],
+            ),
+        )
+    ]
     context["hazards"] = ranked
     return {
         "hazards": ranked,
         "trace": trace_step(
             "rank_risks",
             "ok",
-            "Ranked risk candidates using deterministic confidence and title ordering.",
-            {"hazard_count": len(ranked), "mode": "deterministic-gate1"},
+            "Ranked risk candidates using deterministic source, confidence, and generated-profile ordering.",
+            {"hazard_count": len(ranked), "mode": "deterministic-gate1", "provisionalFirst": True},
             evidence_ids=[hazard.get("id") for hazard in ranked if hazard.get("id")],
         ),
     }

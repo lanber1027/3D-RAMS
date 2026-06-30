@@ -381,6 +381,13 @@ textarea {
   font-size: 0.82rem;
 }
 
+.map-caption small {
+  color: #64746e;
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .empty-map {
   min-height: 676px;
   display: grid;
@@ -466,10 +473,36 @@ textarea {
   gap: 6px 10px;
 }
 
-.risk-grid p {
+.risk-grid p,
+.risk-grid small {
   grid-column: 1 / -1;
   margin: 0;
   color: #4e625c;
+}
+
+.risk-grid small {
+  color: #65766f;
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.review-mode {
+  margin: 12px 14px 0;
+  border: 1px solid #cbd8d2;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #f7faf8;
+  color: #3d544d;
+  font-size: 0.82rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.review-mode.provisional {
+  border-color: #e0b76f;
+  background: #fff8e7;
+  color: #7a4d00;
 }
 
 .risk-factor-panel {

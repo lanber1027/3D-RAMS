@@ -22,9 +22,9 @@ This rendered diagram is the README-scale view of the workflow in [docs/architec
 
 1. User starts a test session with a shared access code.
 2. User asks for a site visit review pack in natural language.
-3. Agent classifies the location input as coordinate, supported fixture, named-site-only, or insufficient.
+3. Agent extracts structured site intent: clean site name, coordinate/postcode clues, site type, activity, date, and unsafe certification/approval intent.
 4. Named-site-only prompts enter a location-resolution stage before review generation.
-5. If candidates exist, the UI asks the user to confirm a candidate location; if not, it asks for postcode, coordinate, nearest town/road, or local authority.
+5. If candidates exist, the UI asks the user to confirm a candidate location; if not, it asks for postcode, coordinate, nearest town/road, or local authority and may show a clearly provisional checklist.
 6. Only after a confirmed location does the agent register uploaded evidence metadata and run allowlisted location, context, map, risk, briefing, and safety tools.
 7. Backend optionally calls Amazon Bedrock server-side when enabled.
 8. UI updates chat, 3D scene, risk cards, evidence, trace, and safety boundary.
@@ -35,8 +35,10 @@ This rendered diagram is the README-scale view of the workflow in [docs/architec
 | Component | Demo1 Status | Notes |
 | --- | --- | --- |
 | Agent workflow | Real Python code | Chat session, tool sequence, evidence, trace, safety gate, deterministic fallback, and response shape are implemented. |
-| Location-resolution loop | Real V3 control flow with fixture-first resolver | Recognizable named-site prompts do not silently map to Lambeth. Candidate locations require user confirmation before the review workflow starts. Bilsbrae currently asks for more location detail because no reliable cached/public candidate is bundled. |
-| Public data pack | Cached public fixture | `fixtures/public-lambeth-thames` includes source metadata for a Lambeth / Thames public-data pack anchored on 8 Albert Embankment. Runtime makes no live public-data calls. |
+| Intent and safety parser | Real V3.1 control flow | Extracts clean site labels, coordinates/postcodes, nearest-town clues, site/activity type, and unsafe certification/approval intent before tool execution. |
+| Location-resolution loop | Real V3.1 control flow with fixture-first and postcode-source resolver | Recognizable named-site prompts do not silently map to Lambeth. Candidate locations require user confirmation before the review workflow starts. Postcode/outcode clues can create source-labelled Postcodes.io candidates server-side; name-only prompts ask for stronger location evidence. |
+| Provisional risk profiles | Real rule layer, not site evidence | Coordinate-backed arbitrary sites get site/activity-specific provisional prompts, such as solar/PV, quarry, drainage/slope, roof, substation/BESS, delivery, and access-track checks. These are labelled provisional, not evidence-backed site findings. |
+| Public data pack | Cached public fixture | `fixtures/public-lambeth-thames` includes source metadata for a Lambeth / Thames public-data pack anchored on 8 Albert Embankment. Runtime makes no live planning/geospatial public-data calls. |
 | Bedrock planner + briefing | Live hosted MVP path | Server-side Bedrock planner/synthesis is enabled in the hosted MVP, capped at 2 model calls per run; deterministic fallback remains available. |
 | 3D viewer | Real React/Vite + CesiumJS UI | Uses a token-free Cesium canvas plus local scene overlay and annotations. |
 | Geospatial features | Cached-public or mocked fixture | Default pack uses cached public-source metadata; synthetic fallback uses `fixtures/geospatial_features.json`. |
@@ -59,6 +61,8 @@ Runtime V3 work is isolated on `feature/durable-runs-tool-loop`. It adds durable
 No AWS, Google Maps, Cesium ion token, or real site data is required.
 
 The chat UI uses the public-safe Lambeth fixture only when the prompt references the supported Lambeth / 8 Albert Embankment context or a maintainer explicitly selects that fixture in compatibility paths. Unknown named sites should not use Lambeth without confirmation.
+
+Arbitrary named sites are not geocoded by broad web search. For a site-specific pack, provide coordinates, a full UK postcode, or enough source evidence for a source-labelled candidate. Name-only prompts can show provisional risk prompts, but they are not map/evidence-backed site findings.
 
 For the 90-second walkthrough, before/after proof, and recording checklist, use [docs/demo-proof.md](docs/demo-proof.md).
 
@@ -184,6 +188,9 @@ curl http://localhost:8000/openapi.json
 | --- | --- | --- |
 | Happy path | Ask: `I want to visit 8 Albert Embankment tomorrow for a survey. Please prepare a pre-visit RAMS-style review pack.` | Chat, scene, risk cards, briefing, evidence, and trace are returned. |
 | Clarification | Ask for a pack without giving a site. | Agent asks targeted questions before running tools. |
+| Random named site | Ask: `I want to visit Foxglove Farm Solar Site near Hexham tomorrow for a PV module inspection.` | Agent asks for stronger location evidence and may show a provisional, non-site-specific checklist. |
+| Coordinate arbitrary site | Ask with a site name and coordinates. | Agent returns a synthetic coordinate-based pack with site/activity-specific provisional risk prompts and explicit limitations. |
+| Postcode candidate | Ask with a site name and UK postcode. | Backend creates a source-labelled postcode candidate and asks for confirmation before review tools run. |
 | Upload metadata | Register a test PDF/image. | Upload evidence metadata is attached to the session; hosted mode uses private S3 presigned upload targets. |
 | Bedrock fallback | Run without backend Bedrock config, or set `BEDROCK_SIMULATE_FAILURE=true`. | Runtime marks model path as disabled/fallback; deterministic briefing remains available. |
 | Unsafe request | Ask the agent to certify RAMS or approve work. | Safety gate blocks certified RAMS/work approval behavior. |

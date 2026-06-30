@@ -9,6 +9,7 @@ from .agent import run_site_briefing
 from .config import RuntimeConfig
 from .location_resolver import resolve_location_candidates
 from .session_store import add_run, get_session
+from .site_intent import parse_site_intent
 from .tools import trace_step
 
 
@@ -24,8 +25,19 @@ def run_fieldbrief_chat(
     session = get_session(session_id, config)
     run_id = f"run-{uuid.uuid4().hex[:12]}"
     agent_state = _agent_runtime_state()
-    request, parse_trace, clarification, location_resolution = _parse_message_to_request(message, uploaded_file_ids, use_bedrock)
+    request, parse_trace, clarification, location_resolution, safety_block = _parse_message_to_request(message, uploaded_file_ids, use_bedrock)
 
+    if safety_block:
+        response = _safety_boundary_response(
+            run_id=run_id,
+            session=session,
+            safety_block=safety_block,
+            parse_trace=parse_trace,
+            started=started,
+            agent_state=agent_state,
+        )
+        _record_run(session_id, response, config)
+        return response
     if location_resolution:
         response = _location_resolution_response(
             run_id=run_id,
@@ -100,25 +112,33 @@ def _parse_message_to_request(
     message: str,
     uploaded_file_ids: list[str],
     use_bedrock: bool,
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[str], dict[str, Any] | None]:
-    lower = message.lower()
-    coordinate = _extract_coordinate(message)
-    known_lambeth = any(term in lower for term in ["lambeth", "albert embankment", "thames", "8 albert"])
-    named_site_hint = any(
-        term in lower
-        for term in [
-            "farm",
-            "solar",
-            "substation",
-            "bess",
-            "battery",
-            "quarry",
-            "data centre",
-            "data center",
-            "wind farm",
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[str], dict[str, Any] | None, dict[str, Any] | None]:
+    intent = parse_site_intent(message)
+    coordinate = intent["coordinate"]
+    known_lambeth = intent["knownPublicFixture"]
+    named_site_hint = intent["namedSiteHint"]
+    site_label = intent["siteName"]
+    unsafe_intent = intent["unsafeIntent"]
+    if unsafe_intent:
+        trace = [
+            trace_step(
+                "chat_parse_user_request",
+                "blocked",
+                "Detected certification, approval, or emergency intent before treating the prompt as a site request.",
+                {
+                    "siteName": None,
+                    "unsafeIntent": True,
+                    "triggeredRules": intent["unsafeTerms"],
+                    "clarificationRequired": False,
+                    "messageSummary": intent["messageSummary"],
+                },
+                evidence_ids=["safety-policy"],
+            )
         ]
-    )
-    site_label = _extract_site_label(message)
+        return {}, trace, [], None, {
+            "message": "I cannot certify RAMS, approve work, or provide emergency guidance. Provide a real site and visit activity if you want a non-certified pre-visit review pack for human review.",
+            "triggeredRules": intent["unsafeTerms"],
+        }
     unresolved_named_site = bool(site_label and not coordinate and not known_lambeth and named_site_hint)
     has_site_signal = coordinate is not None or known_lambeth or named_site_hint
     trace_status = "warning" if unresolved_named_site or not has_site_signal else "ok"
@@ -133,6 +153,12 @@ def _parse_message_to_request(
             ),
             {
                 "hasCoordinate": coordinate is not None,
+                "postcode": intent.get("postcode"),
+                "outcode": intent.get("outcode"),
+                "nearestTown": intent.get("nearestTown"),
+                "siteTypes": intent.get("siteTypes", []),
+                "activities": intent.get("activities", []),
+                "unsafeIntent": unsafe_intent,
                 "knownPublicFixture": known_lambeth,
                 "namedSiteHint": named_site_hint,
                 "siteName": site_label,
@@ -148,17 +174,17 @@ def _parse_message_to_request(
         return {}, trace, [
             "Which site should I assess? Please provide a site name, address, or coordinate.",
             "What is the planned visit activity, for example survey, inspection, delivery, or maintenance?",
-        ], None
+        ], None, None
     if unresolved_named_site:
-        location_resolution, resolver_trace = resolve_location_candidates(site_label, message)
+        location_resolution, resolver_trace = resolve_location_candidates(site_label, message, intent=intent)
         trace.append(resolver_trace)
         clarification = [
             f"I found the site name '{site_label}', but I need a confirmed location before generating a review pack.",
-            "Please confirm one of the candidate cards, or provide a postcode, OS grid reference, latitude/longitude, nearest road/town, or local authority.",
+            _targeted_location_question(intent),
         ]
         if not location_resolution["locationCandidates"]:
-            clarification.append("No reliable cached/public candidate was found for this site name.")
-        return {}, trace, clarification, location_resolution
+            clarification.append("No reliable cached/public candidate was found for this site name. I can only show provisional, non-site-specific risk prompts until location evidence is provided.")
+        return {}, trace, clarification, location_resolution, None
 
     request: dict[str, Any] = {
         "siteName": site_label,
@@ -169,12 +195,13 @@ def _parse_message_to_request(
         "useBedrock": use_bedrock,
         "agentMode": "llm-planner" if use_bedrock else "deterministic",
         "additionalRequest": message,
+        "siteIntent": intent,
     }
     if coordinate:
         request["latitude"] = coordinate[0]
         request["longitude"] = coordinate[1]
         request["fixturePack"] = None
-    return request, trace, [], None
+    return request, trace, [], None, None
 
 
 def _location_resolution_response(
@@ -188,6 +215,7 @@ def _location_resolution_response(
     agent_state: dict[str, Any],
 ) -> dict[str, Any]:
     candidates = location_resolution.get("locationCandidates", [])
+    provisional_risks = location_resolution.get("provisionalRisks", [])
     site_name = location_resolution.get("siteName")
     if candidates:
         assistant_message = (
@@ -202,13 +230,13 @@ def _location_resolution_response(
     safety = {
         "allowed": True,
         "level": "needs_input",
-        "message": "No briefing generated until the site location is confirmed.",
+        "message": "No site-specific briefing generated until the site location is confirmed.",
     }
     ui_state = {
         "location": None,
         "scene": None,
         "annotations": [],
-        "hazards": [],
+        "hazards": provisional_risks,
         "evidence": [],
         "sources": [],
         "briefing": None,
@@ -216,6 +244,7 @@ def _location_resolution_response(
         "trace": parse_trace,
         "architecture": None,
         "locationResolution": location_resolution,
+        "reviewMode": "provisional checklist pending location" if provisional_risks else "location pending",
     }
     return {
         "sessionId": session["sessionId"],
@@ -243,6 +272,69 @@ def _location_resolution_response(
         "briefing": None,
         "safety": safety,
         "fallback": {"status": "available", "reason": "Agent can continue after location confirmation or extra location detail."},
+        "modelCalls": [],
+        "tokenUsage": None,
+    }
+
+
+def _safety_boundary_response(
+    *,
+    run_id: str,
+    session: dict[str, Any],
+    safety_block: dict[str, Any],
+    parse_trace: list[dict[str, Any]],
+    started: float,
+    agent_state: dict[str, Any],
+) -> dict[str, Any]:
+    safety = {
+        "allowed": False,
+        "level": "blocked",
+        "message": safety_block["message"],
+        "triggeredRules": safety_block.get("triggeredRules", []),
+        "requiresHumanReview": True,
+    }
+    ui_state = {
+        "location": None,
+        "scene": None,
+        "annotations": [],
+        "hazards": [],
+        "evidence": [],
+        "sources": [],
+        "briefing": {
+            "headline": "Request blocked by safety boundary.",
+            "summary": [safety_block["message"]],
+            "priority_checks": [],
+            "before_site_visit": [],
+            "limitations": ["3D-RAMS cannot certify RAMS, approve work, or provide emergency guidance."],
+        },
+        "safety": safety,
+        "trace": parse_trace,
+        "architecture": None,
+        "locationResolution": None,
+        "reviewMode": "safety blocked",
+    }
+    return {
+        "sessionId": session["sessionId"],
+        "runId": run_id,
+        "assistantMessage": safety_block["message"],
+        "needsClarification": False,
+        "clarifyingQuestions": [],
+        "agent": agent_state,
+        "uiState": ui_state,
+        "runtime": {
+            "hostedProductMode": True,
+            "briefingMode": "not-run",
+            "activeAgentMode": "safety-gate",
+            "sessionTraceMode": session.get("storageMode", "memory"),
+            "latencyMs": int((time.perf_counter() - started) * 1000),
+        },
+        "trace": parse_trace,
+        "evidence": [],
+        "scene": None,
+        "annotations": [],
+        "briefing": ui_state["briefing"],
+        "safety": safety,
+        "fallback": {"status": "blocked", "reason": safety_block["message"]},
         "modelCalls": [],
         "tokenUsage": None,
     }
@@ -421,3 +513,18 @@ def _extract_site_label(message: str) -> str:
 def _summarise_message(message: str) -> str:
     cleaned = re.sub(r"\s+", " ", message).strip()
     return cleaned[:160]
+
+
+def _targeted_location_question(intent: dict[str, Any]) -> str:
+    clues = []
+    if intent.get("nearestTown"):
+        clues.append(f"near {intent['nearestTown']}")
+    if intent.get("outcode"):
+        clues.append(f"postcode area {intent['outcode']}")
+    if intent.get("localAuthority"):
+        clues.append(f"local authority {intent['localAuthority']}")
+    clue_text = f" I captured the clue(s): {', '.join(clues)}." if clues else ""
+    return (
+        "Please confirm one of the candidate cards, or provide a full postcode, OS grid reference, "
+        f"latitude/longitude, nearest road/town, or local authority.{clue_text}"
+    )
