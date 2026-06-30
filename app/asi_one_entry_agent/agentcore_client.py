@@ -55,6 +55,17 @@ def invoke_runtime_text(
         raise AgentCoreInvokeError("runtime_arn is required.")
 
     region = region or os.getenv("AWS_REGION", "eu-west-2")
+    if os.getenv("AGENTCORE_CLIENT_TRANSPORT", "botocore").strip().lower() != "requests":
+        botocore_body = _invoke_runtime_text_with_botocore(
+            runtime_arn=runtime_arn,
+            payload=payload,
+            session_id=session_id,
+            user_id=user_id,
+            region=region,
+        )
+        if botocore_body is not None:
+            return botocore_body
+
     try:
         import requests
     except ImportError as exc:
@@ -79,6 +90,52 @@ def invoke_runtime_text(
     if response.status_code >= 400:
         raise AgentCoreInvokeError(f"AgentCore returned HTTP {response.status_code}: {response.text[:500]}")
     return response.text
+
+
+def _invoke_runtime_text_with_botocore(
+    *,
+    runtime_arn: str,
+    payload: dict[str, Any],
+    session_id: str | None,
+    user_id: str | None,
+    region: str,
+) -> str | None:
+    try:
+        import botocore.session
+        from botocore.exceptions import BotoCoreError, ClientError, UnknownServiceError
+    except ImportError:
+        return None
+
+    body = json.dumps(payload).encode("utf-8")
+    session = botocore.session.get_session()
+    try:
+        client = session.create_client(AWS_SERVICE, region_name=region)
+    except UnknownServiceError:
+        return None
+
+    try:
+        response = client.invoke_agent_runtime(
+            agentRuntimeArn=runtime_arn,
+            runtimeSessionId=_runtime_session_id(session_id, runtime_arn),
+            runtimeUserId=user_id or "3d-rams-cloud-proxy",
+            contentType="application/json",
+            accept="application/json",
+            payload=body,
+        )
+    except (BotoCoreError, ClientError) as exc:
+        raise AgentCoreInvokeError(f"AgentCore botocore invoke failed: {exc}") from exc
+
+    status_code = int(response.get("statusCode") or 200)
+    response_body = response.get("response")
+    if hasattr(response_body, "read"):
+        response_body = response_body.read()
+    if isinstance(response_body, bytes):
+        text = response_body.decode("utf-8")
+    else:
+        text = str(response_body or "")
+    if status_code >= 400:
+        raise AgentCoreInvokeError(f"AgentCore returned HTTP {status_code}: {text[:500]}")
+    return text
 
 
 def agentcore_url(runtime_arn: str, region: str) -> tuple[str, str, str]:
