@@ -305,7 +305,7 @@ export class AgentCoreStack extends Stack {
       return;
     }
 
-    supervisor.runtime.addEnvironmentVariable('RAMS_SUBAGENT_EXECUTION_MODE', 'agentcore_harness');
+    supervisor.runtime.addEnvironmentVariable('RAMS_SUBAGENT_EXECUTION_MODE', 'direct');
     supervisor.runtime.addEnvironmentVariable('RAMS_HARNESS_ARNS', Stack.of(this).toJsonString(harnessArnMapping));
     supervisor.runtime.addEnvironmentVariable('ENABLE_BEDROCK', 'true');
     supervisor.runtime.addEnvironmentVariable('RUNTIME_DATA_MODE', 'fixture_first');
