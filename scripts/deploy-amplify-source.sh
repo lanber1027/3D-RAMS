@@ -8,6 +8,7 @@ AWS_REGION_VALUE="${AWS_REGION:-${AWS_DEFAULT_REGION:-eu-west-2}}"
 FRAMEWORK="${AMPLIFY_FRAMEWORK:-React}"
 STAGE="${AMPLIFY_STAGE:-DEVELOPMENT}"
 WAIT_FOR_JOB="${AMPLIFY_WAIT:-true}"
+SKIP_GITHUB_PREFLIGHT="${AMPLIFY_SKIP_GITHUB_PREFLIGHT:-false}"
 
 usage() {
   cat <<'EOF'
@@ -31,6 +32,7 @@ Optional:
   AWS_PROFILE                    Optional AWS CLI profile.
   AWS_REGION                     Default: eu-west-2
   AMPLIFY_WAIT                   Default: true
+  AMPLIFY_SKIP_GITHUB_PREFLIGHT  Default: false
 EOF
 }
 
@@ -85,6 +87,69 @@ fi
 
 if [[ -z "${VITE_CLOUD_ENTRY_PROXY_URL:-}" ]]; then
   echo "Warning: VITE_CLOUD_ENTRY_PROXY_URL is empty; hosted UI can load, but cloud workflow calls will fail until it is set." >&2
+fi
+
+if [[ "$SKIP_GITHUB_PREFLIGHT" != "true" ]]; then
+  REPOSITORY_VALUE="$REPOSITORY" python3 - "$TOKEN_FILE" <<'PY'
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+
+token_file = sys.argv[1]
+repository = os.environ["REPOSITORY_VALUE"]
+match = re.search(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+)(?:\.git)?$", repository)
+if not match:
+    raise SystemExit(f"Cannot parse GitHub repository URL: {repository}")
+
+owner = match.group("owner")
+repo = match.group("repo")
+with open(token_file, "r", encoding="utf-8") as handle:
+    token = handle.read().strip()
+
+def github_get(path: str) -> tuple[int, str]:
+    request = urllib.request.Request(
+        f"https://api.github.com{path}",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "3d-rams-amplify-source-deploy",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return response.status, response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        return exc.code, body
+
+repo_status, repo_body = github_get(f"/repos/{owner}/{repo}")
+if repo_status != 200:
+    raise SystemExit(
+        f"GitHub token cannot access {owner}/{repo}; GitHub API returned {repo_status}: {repo_body}"
+    )
+
+repo_payload = json.loads(repo_body)
+permissions = repo_payload.get("permissions") or {}
+if not permissions.get("admin"):
+    raise SystemExit(
+        "GitHub token can access the repository but does not have repo admin permission. "
+        "Amplify source-connected hosting needs repo webhook access; use a token from a repo admin "
+        "with classic scopes repo + admin:repo_hook, or a fine-grained token with repository "
+        "Administration/Webhooks read-write access."
+    )
+
+hooks_status, hooks_body = github_get(f"/repos/{owner}/{repo}/hooks")
+if hooks_status != 200:
+    raise SystemExit(
+        f"GitHub token cannot list repository webhooks; GitHub API returned {hooks_status}: {hooks_body}"
+    )
+
+print(f"GitHub token preflight passed for {owner}/{repo}.")
+PY
 fi
 
 CUSTOM_RULES_JSON='[{"source":"</^[^.]+$|\\.(?!(css|gif|ico|jpg|js|png|txt|svg|woff|woff2|ttf|map|json)$)([^.]+$)/>","target":"/index.html","status":"200"}]'

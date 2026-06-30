@@ -46,7 +46,7 @@ AWS_REGION=eu-west-2 \
 bash scripts/deploy-amplify-source.sh
 ```
 
-The GitHub token must have repository access plus webhook creation permissions for `Capitano00/3D-RAMS`. Keep it in a local file or environment variable only. Do not commit it or paste it into public logs.
+The GitHub token must have repository access plus webhook creation permissions for `Capitano00/3D-RAMS`. In practice, use a token from a repo admin with classic `repo` + `admin:repo_hook` scopes, or a fine-grained token with repository Administration/Webhooks read-write access. Keep it in a local file or environment variable only. Do not commit it or paste it into public logs.
 
 Useful overrides:
 
@@ -60,6 +60,8 @@ VITE_CESIUM_ION_TOKEN=
 ```
 
 The signed proxy must already be reachable from the browser before the hosted UI can complete the cloud workflow.
+
+The deploy script performs a GitHub permission preflight before calling Amplify. If it reports missing repo admin/webhook permission, the same token will fail in Amplify with a GitHub hooks API `404`.
 
 ## Manual Console Setup
 
