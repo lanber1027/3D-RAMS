@@ -9,6 +9,7 @@ import {
   type HarnessDeploymentConfig,
 } from '@aws/agentcore-cdk';
 import { CfnOutput, Stack, type StackProps } from 'aws-cdk-lib';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 
@@ -112,6 +113,22 @@ export class AgentCoreStack extends Stack {
       appProps.credentials = credentials;
     }
     this.application = new AgentCoreApplication(this, 'Application', appProps as any);
+
+    const reportStore = new dynamodb.Table(this, 'ReportStore', {
+      partitionKey: { name: 'caseId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: true,
+      },
+    });
+
+    for (const env of this.application.environments.values()) {
+      if ((env.agent as { name?: string }).name !== 'rams_supervisor_runtime') {
+        continue;
+      }
+      env.runtime.addEnvironmentVariable('RAMS_REPORT_STORE_TABLE', reportStore.tableName);
+      reportStore.grantWriteData(env.runtime.role);
+    }
 
     // Create AgentCoreMcp if there are gateways configured
     if (mcpSpec?.agentCoreGateways && mcpSpec.agentCoreGateways.length > 0) {
@@ -244,6 +261,10 @@ export class AgentCoreStack extends Stack {
     new CfnOutput(this, 'StackNameOutput', {
       description: 'Name of the CloudFormation Stack',
       value: this.stackName,
+    });
+    new CfnOutput(this, 'ReportStoreTableName', {
+      description: 'DynamoDB table storing 3D-RAMS report metadata and structured report payloads by caseId',
+      value: reportStore.tableName,
     });
   }
 }

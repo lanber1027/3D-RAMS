@@ -118,6 +118,7 @@ def handle_invocation(
     output = agentcore_response.get("output") if isinstance(agentcore_response.get("output"), dict) else {}
     return {
         "output": {
+            "caseId": output.get("caseId") or delivery.get("caseId"),
             "delivery": delivery,
             "run": output.get("run"),
             "structuredReport": output.get("structuredReport"),
@@ -127,6 +128,7 @@ def handle_invocation(
                 "mode": "cloud-supervisor-handoff",
                 "adapterVersion": "asi-one-entry-agent-v1",
                 "conversationId": conversation_id,
+                "caseId": output.get("caseId") or delivery.get("caseId"),
             },
         }
     }

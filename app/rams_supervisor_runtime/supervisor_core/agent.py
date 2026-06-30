@@ -22,6 +22,9 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
     request = request or {}
     upstream_context = request.get("agentcoreUpstream")
     request_summary = normalize_request(request)
+    case_id = request_summary.get("caseId")
+    if not case_id and isinstance(upstream_context, dict):
+        case_id = upstream_context.get("caseId")
     fixture_pack, fixture_pack_warning = load_fixture_pack(request_summary["fixturePack"])
     if fixture_pack:
         pack_location = fixture_pack["location"]
@@ -163,6 +166,7 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
 
     return {
         "runId": "demo1-local-run",
+        "caseId": case_id,
         "upstream": upstream_context,
         "request": request_summary,
         "runtime": runtime,

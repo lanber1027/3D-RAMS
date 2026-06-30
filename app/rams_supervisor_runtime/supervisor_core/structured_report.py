@@ -34,6 +34,7 @@ def build_structured_report(
 
     report = StructuredReport(
         reportId=str(run.get("runId") or "unknown-run"),
+        caseId=run.get("caseId"),
         status=_report_status(report_status),
         workflowMode=workflow_mode,
         intake=_build_intake(run, request),
@@ -66,6 +67,7 @@ def build_structured_report(
 
 def _build_intake(run: dict[str, Any], request: dict[str, Any]) -> ReportIntake:
     return ReportIntake(
+        caseId=request.get("caseId") or run.get("caseId"),
         siteName=request.get("siteName"),
         goal=request.get("goal"),
         fixturePack=request.get("fixturePack"),

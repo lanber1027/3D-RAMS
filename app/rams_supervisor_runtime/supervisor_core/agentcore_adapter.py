@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .agent import run_site_briefing
+from .report_store import persist_report
 from .structured_report import build_structured_report
 
 
@@ -22,11 +23,15 @@ def handle_invocation(payload: dict[str, Any] | None) -> dict[str, Any]:
         )
         run = local_response.get("run") if isinstance(local_response, dict) else None
         delivery = local_response.get("delivery") if isinstance(local_response, dict) else None
+        agentcore_output = local_response.get("agentcoreOutput") if isinstance(local_response, dict) else None
+        persistence = agentcore_output.get("persistence") if isinstance(agentcore_output, dict) else None
         return {
             "output": {
+                "caseId": local_response.get("caseId") if isinstance(local_response, dict) else None,
                 "localAsiOne": local_response,
                 "delivery": delivery,
                 "run": run,
+                "persistence": persistence,
                 "reportStatus": delivery.get("status") if isinstance(delivery, dict) else "entry_pending",
                 "workflowMode": delivery.get("workflowMode") if isinstance(delivery, dict) else "entry_intake",
             }
@@ -38,16 +43,20 @@ def _handle_supervisor_invocation(payload: dict[str, Any] | None) -> dict[str, A
     payload = payload or {}
     request = _extract_request(payload)
     run = run_site_briefing(request)
+    case_id = run.get("caseId")
     report_status = "review_required" if run["safety"]["allowed"] else "blocked"
     workflow_mode = _workflow_mode(run)
     structured_report = build_structured_report(run, report_status, workflow_mode)
+    output = {
+        "caseId": case_id,
+        "reportStatus": report_status,
+        "workflowMode": workflow_mode,
+        "structuredReport": structured_report,
+        "run": run,
+    }
+    output["persistence"] = persist_report(output)
     return {
-        "output": {
-            "reportStatus": report_status,
-            "workflowMode": workflow_mode,
-            "structuredReport": structured_report,
-            "run": run,
-        }
+        "output": output
     }
 
 
@@ -79,6 +88,8 @@ def _extract_request(payload: dict[str, Any]) -> dict[str, Any]:
         request["siteName"] = str(location_text)
     if upstream:
         request["agentcoreUpstream"] = upstream
+        if not request.get("caseId") and isinstance(upstream, dict) and upstream.get("caseId"):
+            request["caseId"] = str(upstream["caseId"])
     return request
 
 

@@ -26,6 +26,7 @@ def run_local_asione_chat(
     message = _message_from_payload(payload)
     runtime_options = _runtime_options(payload)
     run_id = f"local-entry-{uuid.uuid4().hex[:12]}"
+    case_id = str(payload.get("caseId") or f"case_{uuid.uuid4().hex[:12]}")
 
     intake, intake_trace, clarifying_questions = _parse_intake(
         message=message,
@@ -36,6 +37,7 @@ def run_local_asione_chat(
             session_id=session_id,
             conversation_id=conversation_id,
             run_id=run_id,
+            case_id=case_id,
             message=message,
             clarifying_questions=clarifying_questions,
             trace=intake_trace,
@@ -47,6 +49,7 @@ def run_local_asione_chat(
             session_id=session_id,
             conversation_id=conversation_id,
             run_id=run_id,
+            case_id=case_id,
             message=message,
             intake=intake,
             trace=intake_trace,
@@ -55,6 +58,7 @@ def run_local_asione_chat(
 
     entry_payload = {
         "conversationId": conversation_id,
+        "caseId": case_id,
         "entryAgentId": "local-asione-substitute",
         "confirmedByUser": True,
         "intake": intake,
@@ -67,6 +71,7 @@ def run_local_asione_chat(
             session_id=session_id,
             conversation_id=conversation_id,
             run_id=run_id,
+            case_id=case_id,
             message=message,
             clarifying_questions=[str(exc)],
             trace=intake_trace,
@@ -122,6 +127,7 @@ def run_local_asione_chat(
     return {
         "sessionId": session_id,
         "conversationId": conversation_id,
+        "caseId": case_id,
         "runId": run_id,
         "assistantMessage": _delivery_message(delivery),
         "needsClarification": False,
@@ -227,6 +233,7 @@ def _clarification_response(
     session_id: str,
     conversation_id: str,
     run_id: str,
+    case_id: str,
     message: str,
     clarifying_questions: list[str],
     trace: list[dict[str, Any]],
@@ -235,6 +242,7 @@ def _clarification_response(
     return {
         "sessionId": session_id,
         "conversationId": conversation_id,
+        "caseId": case_id,
         "runId": run_id,
         "assistantMessage": "I need a little more information before I can launch the 3D-RAMS supervisor.",
         "needsClarification": True,
@@ -262,6 +270,7 @@ def _confirmation_response(
     session_id: str,
     conversation_id: str,
     run_id: str,
+    case_id: str,
     message: str,
     intake: dict[str, Any],
     trace: list[dict[str, Any]],
@@ -270,6 +279,7 @@ def _confirmation_response(
     return {
         "sessionId": session_id,
         "conversationId": conversation_id,
+        "caseId": case_id,
         "runId": run_id,
         "assistantMessage": "I have enough information. Please confirm that I should launch the supervisor run.",
         "needsClarification": False,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -13,6 +14,7 @@ for path in (TOOLS_ROOT, APP_ROOT):
 
 from main import invoke_local, ping_local  # noqa: E402
 from supervisor_core.agent import run_site_briefing  # noqa: E402
+from supervisor_core.report_store import persist_report  # noqa: E402
 
 
 class AgentCoreInvocationTests(unittest.TestCase):
@@ -23,6 +25,7 @@ class AgentCoreInvocationTests(unittest.TestCase):
         response = invoke_local(
             {
                 "input": {
+                    "caseId": "case_supervisor_test_001",
                     "fixturePack": "public-lambeth-thames",
                     "useBedrock": False,
                     "upstream": {"source": "ASI_ONE", "confirmedByUser": True},
@@ -33,6 +36,13 @@ class AgentCoreInvocationTests(unittest.TestCase):
         output = response["output"]
         run = output["run"]
         report = output["structuredReport"]
+        self.assertEqual(output["caseId"], "case_supervisor_test_001")
+        self.assertEqual(run["caseId"], "case_supervisor_test_001")
+        self.assertEqual(run["request"]["caseId"], "case_supervisor_test_001")
+        self.assertEqual(report["caseId"], "case_supervisor_test_001")
+        self.assertEqual(report["intake"]["caseId"], "case_supervisor_test_001")
+        self.assertEqual(output["persistence"]["mode"], "disabled")
+        self.assertEqual(output["persistence"]["status"], "skipped")
         self.assertEqual(output["reportStatus"], "review_required")
         self.assertEqual(output["workflowMode"], "cached_public_fixture")
         self.assertEqual(report["schemaVersion"], "0.1.0")
@@ -114,6 +124,7 @@ class AgentCoreInvocationTests(unittest.TestCase):
         self.assertFalse(entry["needsClarification"])
         self.assertFalse(entry["needsConfirmation"])
         self.assertEqual(output["reportStatus"], "review_required")
+        self.assertEqual(output["persistence"]["mode"], "disabled")
         self.assertEqual(entry["delivery"]["workflowMode"], "cached_public_fixture")
         self.assertEqual(run["runtime"]["localAsiOneSubstitute"], True)
         self.assertEqual(run["runtime"]["entryAgentMode"], "deterministic-local")
@@ -138,6 +149,38 @@ class AgentCoreInvocationTests(unittest.TestCase):
         self.assertTrue(entry["needsClarification"])
         self.assertIsNone(output["run"])
         self.assertEqual(entry["runtime"]["supervisorRuntime"], "not-invoked")
+
+    def test_report_store_writes_dynamodb_item_when_table_is_configured(self):
+        response = invoke_local(
+            {
+                "input": {
+                    "caseId": "case_store_test_001",
+                    "fixturePack": "public-lambeth-thames",
+                    "useBedrock": False,
+                }
+            }
+        )
+        output = response["output"]
+        writes: list[dict] = []
+
+        class FakeTable:
+            def put_item(self, *, Item):
+                writes.append(Item)
+
+        with patch.dict("os.environ", {"RAMS_REPORT_STORE_TABLE": "rams-report-store-test"}):
+            persistence = persist_report(output, table=FakeTable())
+
+        self.assertEqual(persistence["mode"], "dynamodb")
+        self.assertEqual(persistence["status"], "stored")
+        self.assertEqual(persistence["tableName"], "rams-report-store-test")
+        self.assertEqual(persistence["caseId"], "case_store_test_001")
+        self.assertEqual(len(writes), 1)
+        item = writes[0]
+        self.assertEqual(item["caseId"], "case_store_test_001")
+        self.assertEqual(item["reportStatus"], "review_required")
+        self.assertEqual(item["workflowMode"], "cached_public_fixture")
+        self.assertEqual(item["structuredReport"]["caseId"], "case_store_test_001")
+        self.assertEqual(item["runSummary"]["runtime"]["fixturePack"], "public-lambeth-thames")
 
 
 if __name__ == "__main__":

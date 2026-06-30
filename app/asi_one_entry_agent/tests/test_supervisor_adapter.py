@@ -26,6 +26,7 @@ from supervisor_adapter import (  # noqa: E402
 
 def confirmed_entry_payload() -> dict:
     return {
+        "caseId": "case_test_agentverse_001",
         "conversationId": "agentverse-session-id",
         "entryAgentId": "rams-entry-agent",
         "confirmedByUser": True,
@@ -76,12 +77,14 @@ class AgentVerseAdapterTests(unittest.TestCase):
         invocation = build_agentcore_invocation(confirmed_entry_payload())
 
         agent_input = invocation["input"]
+        self.assertEqual(agent_input["caseId"], "case_test_agentverse_001")
         self.assertEqual(agent_input["siteName"], "Lambeth Thames public fixture")
         self.assertEqual(agent_input["latitude"], 51.4908)
         self.assertEqual(agent_input["longitude"], -0.1216)
         self.assertEqual(agent_input["fixturePack"], "public-lambeth-thames")
         self.assertFalse(agent_input["useBedrock"])
         self.assertEqual(agent_input["upstream"]["source"], "AGENTVERSE")
+        self.assertEqual(agent_input["upstream"]["caseId"], "case_test_agentverse_001")
         self.assertTrue(agent_input["upstream"]["confirmedByUser"])
         self.assertEqual(agent_input["upstream"]["materialCount"], 1)
 
@@ -93,9 +96,13 @@ class AgentVerseAdapterTests(unittest.TestCase):
             agentcore_response["output"]["run"]["upstream"]["conversationId"],
             "agentverse-session-id",
         )
+        self.assertEqual(agentcore_response["output"]["caseId"], "case_test_agentverse_001")
+        self.assertEqual(agentcore_response["output"]["run"]["caseId"], "case_test_agentverse_001")
+        self.assertEqual(agentcore_response["output"]["structuredReport"]["caseId"], "case_test_agentverse_001")
 
         delivery = build_delivery_payload(agentcore_response, entry_payload=entry_payload)
 
+        self.assertEqual(delivery["caseId"], "case_test_agentverse_001")
         self.assertEqual(delivery["conversationId"], "agentverse-session-id")
         self.assertEqual(delivery["status"], "review_required")
         self.assertEqual(delivery["workflowMode"], "cached_public_fixture")
@@ -121,10 +128,13 @@ class AgentVerseAdapterTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["runtime_arn"], "arn:aws:bedrock-agentcore:eu-west-2:123456789012:runtime/supervisor-test")
         self.assertEqual(calls[0]["payload"]["input"]["upstream"]["source"], "AGENTVERSE")
+        self.assertEqual(calls[0]["payload"]["input"]["caseId"], "case_test_agentverse_001")
         output = response["output"]
+        self.assertEqual(output["caseId"], "case_test_agentverse_001")
         self.assertEqual(output["reportStatus"], "review_required")
         self.assertEqual(output["workflowMode"], "cached_public_fixture")
         self.assertEqual(output["entryAgent"]["mode"], "cloud-supervisor-handoff")
+        self.assertEqual(output["entryAgent"]["caseId"], "case_test_agentverse_001")
         self.assertTrue(output["structuredReport"]["visualization"]["annotations"])
         self.assertIsNone(output["run"]["runtime"].get("localAsiOneSubstitute"))
 

@@ -9,6 +9,7 @@ def normalize_request(request: dict[str, Any]) -> dict[str, Any]:
     fixture_pack = request.get("fixturePack") or request.get("fixture_pack")
     agent_mode = str(request.get("agentMode") or request.get("agent_mode") or "llm-planner").strip().lower()
     return {
+        "caseId": request.get("caseId") or None,
         "siteName": request.get("siteName") or "Demo rural field fixture",
         "latitude": float(request.get("latitude", 52.2053)),
         "longitude": float(request.get("longitude", -1.6022)),

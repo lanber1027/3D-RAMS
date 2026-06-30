@@ -69,7 +69,8 @@ For repeatable AgentCore workflow proof, run `python scripts/evaluate-demo.py` f
 | Bedrock briefing | Optional live AWS call only when explicitly configured. |
 | Planning portals/PDFs | Not scraped in MVP. |
 | Google 3D / Earth | Not required in MVP. |
-| CloudWatch, DynamoDB, S3, Guardrails | Future production path, not live MVP infrastructure. |
+| DynamoDB report store | Optional cloud persistence when `RAMS_REPORT_STORE_TABLE` is configured; disabled in no-AWS local demos. |
+| CloudWatch, S3, Guardrails | Future production path, not live MVP infrastructure. |
 
 ## Recording Checklist
 

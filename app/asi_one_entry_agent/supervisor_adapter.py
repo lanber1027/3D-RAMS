@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 
@@ -42,7 +43,9 @@ def build_agentcore_invocation(entry_payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(materials, list):
         raise AdapterValidationError("intake.materials must be a list when provided.")
 
+    case_id = _case_id(payload)
     input_payload: dict[str, Any] = {
+        "caseId": case_id,
         "siteName": _site_name(location_text, location_candidate),
         "goal": user_goal,
         "additionalRequest": _additional_request(intake),
@@ -51,6 +54,7 @@ def build_agentcore_invocation(entry_payload: dict[str, Any]) -> dict[str, Any]:
             "adapterVersion": ADAPTER_VERSION,
             "conversationId": _optional_text(payload.get("conversationId")),
             "entryAgentId": _optional_text(payload.get("entryAgentId")),
+            "caseId": case_id,
             "confirmedByUser": True,
             "areaScope": area_scope,
             "locationConfidence": location_candidate.get("confidence"),
@@ -82,11 +86,13 @@ def build_delivery_payload(
     briefing = run.get("briefing") if isinstance(run.get("briefing"), dict) else {}
     safety = run.get("safety") if isinstance(run.get("safety"), dict) else {}
     location = run.get("location") if isinstance(run.get("location"), dict) else {}
+    case_id = _optional_text(output.get("caseId")) or _optional_text(run.get("caseId"))
 
     source_entry = entry_payload or {}
     conversation_id = source_entry.get("conversationId") if isinstance(source_entry, dict) else None
 
     return {
+        "caseId": case_id,
         "conversationId": _optional_text(conversation_id),
         "status": output.get("reportStatus") or safety.get("level") or "unknown",
         "workflowMode": output.get("workflowMode") or "unknown",
@@ -99,6 +105,8 @@ def build_delivery_payload(
         },
         "deepReport": {
             "kind": "agentcore_run_payload",
+            "caseId": case_id,
+            "casePath": f"/case/{case_id}" if case_id else None,
             "runId": run.get("runId"),
             "evidenceCount": len(run.get("evidence") or []),
             "traceCount": len(run.get("trace") or []),
@@ -128,6 +136,13 @@ def _site_name(location_text: str | None, location_candidate: dict[str, Any]) ->
     if location_text:
         return location_text
     return "Confirmed AgentVerse intake location"
+
+
+def _case_id(payload: dict[str, Any]) -> str:
+    existing = _optional_text(payload.get("caseId"))
+    if existing:
+        return existing
+    return f"case_{uuid.uuid4().hex[:12]}"
 
 
 def _additional_request(intake: dict[str, Any]) -> str:

@@ -69,7 +69,8 @@ The deterministic evaluation runner covers:
 | Public source freshness | Source metadata is visible, but the app does not refresh sources at runtime. |
 | 3D map data | Token-free local Cesium view and fixture overlay; no Google Earth/3D Tiles. |
 | Bedrock | Optional local model-assisted briefing only; no hosted public endpoint. |
-| AWS production path | Architecture path only for DynamoDB, S3, CloudWatch, Guardrails, and AgentCore. |
+| DynamoDB report store | Optional `caseId` report persistence when configured; local no-AWS demos skip it. |
+| AWS production path | Architecture path only for S3, CloudWatch, Guardrails, and deeper AgentCore deployment hardening. |
 | Safety/RAMS | Human-review briefing only; not certified RAMS, work approval, or emergency guidance. |
 | Impact metrics | [impact-baseline.md](impact-baseline.md) is ready; numeric speed-up claims still need a completed and reviewed timed run. |
 

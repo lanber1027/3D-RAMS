@@ -141,7 +141,7 @@ flowchart LR
 
     Span -. "future" .-> CloudWatch["CloudWatch trace span"]
     Evidence -. "future" .-> S3["S3 evidence pack"]
-    Visualizer -. "future" .-> DDB["DynamoDB run record"]
+    Visualizer -. "optional when configured" .-> DDB["DynamoDB report store by caseId"]
 ```
 
 Each runtime tool emits a compact trace object:
@@ -173,7 +173,7 @@ The safety gate is deliberately visible. Judges and teammates should be able to 
 | --- | --- | --- | --- | --- | --- |
 | Agent loop | AgentCore Python runtime | Real deterministic code plus optional Bedrock briefing | Tool timeline and trace | Bedrock model/tool planning | Model variability and evaluation |
 | Public fixture pack | `fixtures/public-lambeth-thames` | Cached public-source metadata and attribution files | Source register, evidence, trace, briefing | S3 source pack plus source registry | Source freshness, licence handling, and overclaiming |
-| Request state | Browser form payload | Real | Run overview | DynamoDB run/session record | Data privacy and retention |
+| Request state | Browser form payload plus optional `caseId` report-store item | Real; DynamoDB write only when configured | Run overview | DynamoDB report metadata keyed by `caseId` | Data privacy and retention |
 | 3D viewer | React/Vite + CesiumJS | Real token-free local scene plus overlay | 3D scene | Static frontend plus API runtime | Performance on low-power devices |
 | Geospatial features | Synthetic fixture or cached public pack | Mocked, cached-public, or fallback | Sources and annotations | S3 source object plus live geospatial APIs | Licensing, freshness, key management |
 | Planning context | Synthetic fixture or cached public pack | Synthetic, cached-public, or unavailable | Sources, evidence, briefing limits | S3 documents plus Bedrock extraction | Scraping reliability and citations |
@@ -202,7 +202,7 @@ flowchart TB
     UI --> Runtime["AgentCore Runtime endpoint"]
     Runtime --> Bedrock["Amazon Bedrock briefing generation"]
     Runtime --> Guardrails["Bedrock Guardrails"]
-    Runtime --> DDB["DynamoDB run state and approvals"]
+    Runtime --> DDB["DynamoDB report store by caseId"]
     Runtime --> S3["S3 evidence packs and source documents"]
     Runtime --> CloudWatch["CloudWatch logs, metrics, traces"]
     Runtime --> Sources["Planning and geospatial APIs"]

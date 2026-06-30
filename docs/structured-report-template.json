@@ -2,9 +2,11 @@
   "schemaVersion": "0.1.0",
   "reportType": "3d-rams-site-review",
   "reportId": "demo1-local-run",
+  "caseId": "case_demo_fixture_001",
   "status": "review_required",
   "workflowMode": "cached_public_fixture",
   "intake": {
+    "caseId": "case_demo_fixture_001",
     "siteName": "8 Albert Embankment and land to the rear",
     "goal": "Pre-visit RAMS scoping pack",
     "fixturePack": "public-lambeth-thames",
@@ -14,6 +16,7 @@
     "additionalRequest": null,
     "upstream": {
       "source": "ASI_ONE",
+      "caseId": "case_demo_fixture_001",
       "confirmedByUser": true
     }
   },
