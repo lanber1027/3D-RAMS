@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from typing import Any
 
 from agentcore_client import invoke_runtime_json
@@ -114,7 +115,7 @@ def handle_invocation(
     agentcore_response = invoke_runtime(
         runtime_arn=runtime_arn,
         payload=invocation,
-        session_id=conversation_id,
+        session_id=_agentcore_session_id(conversation_id),
         user_id=user_id,
     )
     delivery = build_delivery_payload(agentcore_response, entry_payload=payload)
@@ -257,6 +258,10 @@ def _handle_report_lookup(
 
 def _text_delta_event(text: str) -> dict[str, Any]:
     return {"event": {"contentBlockDelta": {"delta": {"text": text}}}}
+
+
+def _agentcore_session_id(seed: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"3d-rams-entry-agent:{seed}"))
 
 
 if __name__ == "__main__":

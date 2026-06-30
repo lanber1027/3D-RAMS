@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -28,10 +29,11 @@ class FrontendProxyHandler(BaseHTTPRequestHandler):
             payload = self._read_json()
             runtime_arn = os.environ["AGENTCORE_RUNTIME_ARN"]
             conversation_id = str(payload.get("conversationId") or payload.get("sessionId") or "frontend-demo-session")
+            agentcore_session_id = _agentcore_session_id(conversation_id)
             response = invoke_runtime_json(
                 runtime_arn=runtime_arn,
-                payload=payload,
-                session_id=conversation_id,
+                payload=_payload_with_agentcore_session(payload, agentcore_session_id),
+                session_id=agentcore_session_id,
                 user_id="3d-rams-frontend",
                 timeout=int(os.getenv("AGENTCORE_PROXY_TIMEOUT", "120")),
             )
@@ -70,6 +72,20 @@ def run() -> None:
     server = ThreadingHTTPServer((host, port), FrontendProxyHandler)
     print(f"3D-RAMS AgentCore frontend proxy listening on http://{host}:{port}")
     server.serve_forever()
+
+
+def _agentcore_session_id(seed: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"3d-rams-frontend-proxy:{seed}"))
+
+
+def _payload_with_agentcore_session(payload: dict[str, Any], session_id: str) -> dict[str, Any]:
+    if len(str(payload.get("conversationId") or "")) >= 33:
+        return payload
+    normalized = dict(payload)
+    if payload.get("conversationId"):
+        normalized["frontendConversationId"] = payload["conversationId"]
+    normalized["conversationId"] = session_id
+    return normalized
 
 
 if __name__ == "__main__":

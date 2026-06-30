@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
+from urllib import error, request
 
 
 AWS_SERVICE = "bedrock-agentcore"
@@ -53,36 +54,46 @@ def invoke_runtime_text(
         raise AgentCoreInvokeError("runtime_arn is required.")
 
     region = region or os.getenv("AWS_REGION", "eu-west-2")
-    try:
-        import requests
-    except ImportError as exc:
-        raise AgentCoreInvokeError("requests is required to invoke AgentCore runtimes.") from exc
-
     url, host, path = agentcore_url(runtime_arn, region)
     body = json.dumps(payload).encode("utf-8")
-    response = requests.post(
-        url,
-        data=body,
-        headers=signed_headers(
-            method="POST",
-            path=path,
-            host=host,
-            payload=body,
-            session_id=session_id or _session_id(runtime_arn),
-            user_id=user_id or "3d-rams-cloud-proxy",
-            region=region,
-        ),
-        timeout=timeout,
+    headers = signed_headers(
+        method="POST",
+        path=path,
+        host=host,
+        payload=body,
+        session_id=session_id or _session_id(runtime_arn),
+        user_id=user_id or "3d-rams-cloud-proxy",
+        region=region,
     )
-    if response.status_code >= 400:
-        raise AgentCoreInvokeError(f"AgentCore returned HTTP {response.status_code}: {response.text[:500]}")
-    return response.text
+    return _post_text(url=url, body=body, headers=headers, timeout=timeout)
 
 
 def agentcore_url(runtime_arn: str, region: str) -> tuple[str, str, str]:
     host = f"{AWS_SERVICE}.{region}.amazonaws.com"
     path = f"/runtimes/{quote(runtime_arn, safe='')}/invocations"
     return f"https://{host}{path}", host, path
+
+
+def _post_text(*, url: str, body: bytes, headers: dict[str, str], timeout: int) -> str:
+    try:
+        import requests
+    except ImportError:
+        return _post_text_urllib(url=url, body=body, headers=headers, timeout=timeout)
+
+    response = requests.post(url, data=body, headers=headers, timeout=timeout)
+    if response.status_code >= 400:
+        raise AgentCoreInvokeError(f"AgentCore returned HTTP {response.status_code}: {response.text[:500]}")
+    return response.text
+
+
+def _post_text_urllib(*, url: str, body: bytes, headers: dict[str, str], timeout: int) -> str:
+    req = request.Request(url, data=body, headers=headers, method="POST")
+    try:
+        with request.urlopen(req, timeout=timeout) as response:
+            return response.read().decode("utf-8")
+    except error.HTTPError as exc:
+        text = exc.read().decode("utf-8", errors="replace")
+        raise AgentCoreInvokeError(f"AgentCore returned HTTP {exc.code}: {text[:500]}") from exc
 
 
 def signed_headers(
