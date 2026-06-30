@@ -108,6 +108,12 @@ def validate_harness_output(
     missing_data_keys = [key for key in keys if key not in data]
     if missing_data_keys:
         issues.append(f"data missing required keys: {', '.join(missing_data_keys)}.")
+    if expected_group == "review_guardrail":
+        safety = data.get("safety")
+        if not isinstance(safety, dict):
+            issues.append("data.safety must be an object.")
+        elif not isinstance(safety.get("allowed"), bool):
+            issues.append("data.safety.allowed must be a boolean.")
 
     for field in ("evidence", "findings", "trace", "references", "warnings", "errors"):
         if not isinstance(value.get(field), list):
