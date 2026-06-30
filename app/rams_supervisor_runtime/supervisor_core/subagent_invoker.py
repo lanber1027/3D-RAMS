@@ -29,6 +29,7 @@ from .harness_contract import (
     HARNESS_OUTPUT_SCHEMA_VERSION,
     build_harness_output,
     finding_from_hazard,
+    flatten_harness_output,
     validate_harness_output,
 )
 
@@ -226,11 +227,12 @@ class DirectSubagentInvoker:
     ) -> dict[str, Any]:
         safety, step = safety_gate(request, briefing)
         trace = [step]
+        review_decision = "pass" if safety.get("allowed") else "fail"
         return build_harness_output(
             "review_guardrail",
             status=_status_from_trace(trace),
             summary="Reviewed briefing output against the 3D-RAMS safety boundary.",
-            data={"safety": safety},
+            data={"safety": safety, "reviewDecision": review_decision},
             trace=trace,
             warnings=_warnings_from_trace(trace),
             metadata=_harness_metadata(request, None),
@@ -383,7 +385,7 @@ class AgentCoreHarnessInvoker:
             )
             if validation_issues:
                 return self._fallback_json(group, payload, validation_issues=validation_issues, raw_result=result)
-            return result
+            return flatten_harness_output(result)
 
         raise RuntimeError(f"Harness '{harness_name}' exceeded local tool-loop limit.")
 
@@ -530,7 +532,8 @@ def _user_json_message(payload: dict[str, Any]) -> dict[str, Any]:
                     f"then return one JSON object using schemaVersion {HARNESS_OUTPUT_SCHEMA_VERSION}. "
                     "Put all domain-specific fields under data and include subagent, status, summary, "
                     "evidence, findings, trace, references, warnings, errors, and metadata. "
-                    "Do not include hidden chain-of-thought, credentials, signed URLs, or private material content. "
+                    "Keep output UI-safe and log-safe; do not include hidden chain-of-thought, credentials, "
+                    "signed URLs, or private material content. "
                     "The data object must include requiredDataKeys. Payload:\n"
                     f"{json.dumps(payload, sort_keys=True)}"
                 )
