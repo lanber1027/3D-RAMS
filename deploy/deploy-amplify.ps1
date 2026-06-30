@@ -11,9 +11,18 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $distPath = Join-Path $repoRoot "frontend\dist"
 $zipPath = Join-Path $repoRoot ".deploy-build\3d-rams-frontend.zip"
 $summaryFile = Join-Path $PSScriptRoot "amplify-summary.json"
+$hostedSummaryFile = Join-Path $PSScriptRoot "hosted-mvp-summary.json"
 
 if (-not (Test-Path (Join-Path $distPath "index.html"))) {
     throw "Frontend dist is missing. Run the frontend build before deploying Amplify."
+}
+if (Test-Path $hostedSummaryFile) {
+    $apiEndpoint = ((Get-Content $hostedSummaryFile -Raw | ConvertFrom-Json).apiEndpoint).TrimEnd("/")
+    $assetMatches = Get-ChildItem -LiteralPath (Join-Path $distPath "assets") -Filter "*.js" -File -ErrorAction SilentlyContinue |
+        Select-String -SimpleMatch $apiEndpoint -List
+    if (-not $assetMatches) {
+        throw "Frontend dist does not contain API endpoint $apiEndpoint. Rebuild with `$env:VITE_API_BASE_URL=`"$apiEndpoint`" before deploying Amplify."
+    }
 }
 
 function Invoke-AwsJson {
