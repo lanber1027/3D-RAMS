@@ -25,6 +25,7 @@ def build_entry_turn(payload: dict[str, Any]) -> dict[str, Any]:
         "message": message,
         "confirmedByUser": bool(payload.get("confirmedByUser") or _looks_like_confirmation(message)),
         "accessContext": _access_context(payload),
+        "reportAccess": _report_access(payload),
         "materials": _materials(payload),
         "runtimeOptions": _runtime_options(payload),
     }
@@ -134,6 +135,7 @@ def build_confirmed_entry_payload(turn: dict[str, Any], intake_result: dict[str,
         "entryAgentId": turn["entryAgentId"],
         "caller": turn["caller"],
         "confirmedByUser": True,
+        "reportAccess": turn.get("reportAccess") or {},
         "accessContext": turn.get("accessContext") or {},
         "intake": intake_result["intake"],
         "runtimeOptions": turn["runtimeOptions"],
@@ -258,6 +260,12 @@ def _access_context(payload: dict[str, Any]) -> dict[str, Any]:
         or runtime_options.get("identityContext")
         or {}
     )
+    return context if isinstance(context, dict) else {}
+
+
+def _report_access(payload: dict[str, Any]) -> dict[str, Any]:
+    runtime_options = payload.get("runtimeOptions") if isinstance(payload.get("runtimeOptions"), dict) else {}
+    context = payload.get("reportAccess") or payload.get("reportAccessContext") or runtime_options.get("reportAccess") or {}
     return context if isinstance(context, dict) else {}
 
 
