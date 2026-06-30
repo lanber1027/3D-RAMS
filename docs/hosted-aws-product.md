@@ -73,6 +73,21 @@ Still deferred:
 - Cognito login;
 - richer live data adapters beyond current cached-public/synthetic fallback shape.
 
+## V2 Durable Runtime Branch
+
+The `feature/durable-runs-tool-loop` branch adds durable run APIs without replacing this hosted MVP:
+
+- `POST /api/runs` creates a `runId` and initial checkpoint;
+- `GET /api/runs/{runId}` lets the frontend poll/reconnect;
+- `POST /api/runs/{runId}/cancel` records cancellation;
+- the backend executes only allowlisted tools from a registry;
+- planner, reasoner, and compiler phases have separate token budgets;
+- the branch remains local/memory-backed until a separate v2 test stack is reviewed.
+
+Future AWS shape for v2 is API Gateway/Lambda to a DynamoDB run table, SQS queue, worker Lambda, Bedrock, and CloudWatch. Step Functions remains a later option if the workflow stabilizes into fixed auditable phases.
+
+See [durable-runtime-v2.md](durable-runtime-v2.md).
+
 ## Security And Cost Boundaries
 
 - Bedrock is called only from the backend.

@@ -53,6 +53,8 @@ Ask the maintainer for the private test access code. Do not commit, paste into p
 
 The hosted product path is documented in [docs/hosted-aws-product.md](docs/hosted-aws-product.md). Use [docs/team-test-guide.md](docs/team-test-guide.md) for the current scenario checklist and feedback rules.
 
+Runtime v2 work is isolated on `feature/durable-runs-tool-loop`. It adds durable run APIs, checkpointed tool execution, polling/reconnect UX, and a 3-phase model-budget design without replacing the current hosted MVP. See [docs/durable-runtime-v2.md](docs/durable-runtime-v2.md).
+
 No AWS, Google Maps, Cesium ion token, or real site data is required.
 
 The chat UI defaults to a public-safe Lambeth example when the prompt references 8 Albert Embankment or when local fallback needs a deterministic fixture.

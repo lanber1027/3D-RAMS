@@ -43,6 +43,12 @@ class RuntimeConfig:
     bedrock_max_tokens: int
     bedrock_temperature: float
     bedrock_max_model_calls: int
+    durable_run_max_tool_calls: int
+    durable_run_timeout_seconds: int
+    durable_run_process_inline: bool
+    planner_output_tokens: int
+    reasoner_output_tokens: int
+    compiler_output_tokens: int
     bedrock_mock_response: bool
     bedrock_simulate_failure: bool
     app_env: str
@@ -68,7 +74,13 @@ class RuntimeConfig:
             ),
             bedrock_max_tokens=_env_int("BEDROCK_MAX_TOKENS", 1200),
             bedrock_temperature=_env_float("BEDROCK_TEMPERATURE", 0.2),
-            bedrock_max_model_calls=min(max(_env_int("BEDROCK_MAX_MODEL_CALLS", 2), 0), 2),
+            bedrock_max_model_calls=min(max(_env_int("BEDROCK_MAX_MODEL_CALLS", 2), 0), 3),
+            durable_run_max_tool_calls=min(max(_env_int("DURABLE_RUN_MAX_TOOL_CALLS", 10), 1), 20),
+            durable_run_timeout_seconds=min(max(_env_int("DURABLE_RUN_TIMEOUT_SECONDS", 45), 5), 240),
+            durable_run_process_inline=_env_bool("DURABLE_RUN_PROCESS_INLINE", False),
+            planner_output_tokens=min(max(_env_int("BEDROCK_PLANNER_MAX_TOKENS", 900), 256), 3000),
+            reasoner_output_tokens=min(max(_env_int("BEDROCK_REASONER_MAX_TOKENS", 1500), 256), 4000),
+            compiler_output_tokens=min(max(_env_int("BEDROCK_COMPILER_MAX_TOKENS", 2200), 512), 5000),
             bedrock_mock_response=_env_bool("BEDROCK_MOCK_RESPONSE", False),
             bedrock_simulate_failure=_env_bool("BEDROCK_SIMULATE_FAILURE", False),
             app_env=os.getenv("APP_ENV", "local"),
@@ -94,5 +106,11 @@ class RuntimeConfig:
             "maxTokens": self.bedrock_max_tokens if self.bedrock_enabled else None,
             "temperature": self.bedrock_temperature if self.bedrock_enabled else None,
             "maxModelCalls": self.bedrock_max_model_calls,
+            "phaseTokenBudgets": {
+                "planner": self.planner_output_tokens,
+                "reasoner": self.reasoner_output_tokens,
+                "compiler": self.compiler_output_tokens,
+            },
+            "maxToolCalls": self.durable_run_max_tool_calls,
             "fallbackReason": fallback_reason,
         }

@@ -48,6 +48,10 @@ button.secondary {
   background: #273549;
 }
 
+button.danger {
+  background: #9a3412;
+}
+
 h1,
 h2,
 h3,
@@ -154,6 +158,36 @@ textarea {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.run-status-bar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr)) max-content;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.run-status-bar article {
+  min-height: 54px;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  border: 1px solid #d5ddd9;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px 10px;
+}
+
+.run-status-bar span {
+  color: #5f706a;
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.run-status-bar strong {
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
 }
 
 .safety-pill {
@@ -280,7 +314,7 @@ textarea {
 
 .composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
   gap: 10px;
   border-top: 1px solid #edf2ef;
   padding: 14px;
@@ -460,7 +494,8 @@ textarea {
   .insight-grid,
   .access-panel,
   .evidence-trace-grid,
-  .runtime-strip {
+  .runtime-strip,
+  .run-status-bar {
     grid-template-columns: 1fr;
   }
 

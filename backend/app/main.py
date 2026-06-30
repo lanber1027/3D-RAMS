@@ -7,8 +7,9 @@ from .access import validate_access_code
 from .agent import run_site_briefing
 from .chat_agent import run_fieldbrief_chat
 from .config import RuntimeConfig
+from .durable_runner import cancel_durable_run, create_durable_run, read_durable_run
 from .hosted_logging import log_event, now_ms
-from .models import ChatRequest, HealthResponse, SessionStartRequest, SiteBriefRequest, UploadUrlRequest
+from .models import ChatRequest, HealthResponse, RunCreateRequest, SessionStartRequest, SiteBriefRequest, UploadUrlRequest
 from .session_store import create_session, get_session, public_session
 from .upload_service import create_upload_target
 
@@ -119,6 +120,50 @@ def chat(payload: ChatRequest) -> dict[str, object]:
         safetyLevel=result.get("safety", {}).get("level"),
         fallbackStatus=result.get("fallback", {}).get("status"),
         modelCallCount=len(result.get("modelCalls", [])),
+        latencyMs=now_ms() - started,
+    )
+    return result
+
+
+@app.post("/api/runs", status_code=202)
+def create_run(payload: RunCreateRequest) -> dict[str, object]:
+    started = now_ms()
+    config = RuntimeConfig.from_env(request_bedrock=payload.useBedrock)
+    get_session(payload.sessionId, config)
+    result = create_durable_run(
+        session_id=payload.sessionId,
+        message=payload.message,
+        uploaded_file_ids=payload.uploadedFileIds,
+        use_bedrock=payload.useBedrock,
+        auto_start=payload.autoStart,
+        config=config,
+    )
+    log_event(
+        "durable_run_create",
+        sessionId=payload.sessionId,
+        runId=result.get("runId"),
+        status=result.get("status"),
+        autoStart=payload.autoStart,
+        useBedrock=payload.useBedrock,
+        latencyMs=now_ms() - started,
+    )
+    return result
+
+
+@app.get("/api/runs/{run_id}")
+def get_run(run_id: str) -> dict[str, object]:
+    return read_durable_run(run_id)
+
+
+@app.post("/api/runs/{run_id}/cancel")
+def cancel_run(run_id: str) -> dict[str, object]:
+    started = now_ms()
+    result = cancel_durable_run(run_id)
+    log_event(
+        "durable_run_cancel",
+        sessionId=result.get("sessionId"),
+        runId=run_id,
+        status=result.get("status"),
         latencyMs=now_ms() - started,
     )
     return result

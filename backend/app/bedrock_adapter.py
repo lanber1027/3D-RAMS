@@ -154,6 +154,59 @@ def generate_bedrock_planner_synthesis(
     return briefing, _metadata(config, started, "bedrock", phase="planner-synthesis", model_call_count=1)
 
 
+def generate_bedrock_risk_reasoning(
+    *,
+    config: RuntimeConfig,
+    location: dict[str, Any],
+    hazards: list[dict[str, Any]],
+    evidence: list[dict[str, Any]],
+    executed_tools: list[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if config.bedrock_simulate_failure:
+        raise BedrockAdapterError("Simulated Bedrock failure requested by BEDROCK_SIMULATE_FAILURE.")
+    if config.bedrock_max_model_calls < 2:
+        raise BedrockAdapterError("Bedrock model call budget is below the planner+reasoner minimum.")
+
+    started = time.perf_counter()
+    if config.bedrock_mock_response:
+        reasoning = _mock_bedrock_risk_reasoning(hazards, evidence, executed_tools)
+        return reasoning, _metadata(config, started, "bedrock-mock", phase="risk-reasoner", model_call_count=1)
+
+    response_text = _invoke_bedrock_json(
+        config,
+        {
+            "task": "Rank site visit risks and identify uncertainty from bounded tool outputs.",
+            "safety_boundary": (
+                "This is not certified RAMS, emergency guidance, or work approval. "
+                "Every risk statement must stay evidence-backed and human-review required."
+            ),
+            "required_json_schema": {
+                "ranked_risks": [
+                    {
+                        "title": "string",
+                        "reason": "string",
+                        "confidence": "high|medium|low",
+                        "evidence_ids": ["string"],
+                    }
+                ],
+                "uncertainties": ["string"],
+                "approval_required": "boolean",
+            },
+            "site": {
+                "label": location.get("label"),
+                "latitude": location.get("latitude"),
+                "longitude": location.get("longitude"),
+                "authority": location.get("authority"),
+            },
+            "hazards": hazards[:8],
+            "evidence": evidence,
+            "executed_tools": executed_tools,
+        },
+    )
+    reasoning = _normalise_reasoning(_extract_json_object(response_text), hazards, evidence)
+    return reasoning, _metadata(config, started, "bedrock", phase="risk-reasoner", model_call_count=1)
+
+
 def _anthropic_payload(
     config: RuntimeConfig,
     location: dict[str, Any],
@@ -351,6 +404,34 @@ def _mock_bedrock_tool_plan(scenario: str) -> dict[str, Any]:
                 {"name": "resolve_location", "arguments": {}},
             ],
         }
+    if scenario == "bad-order":
+        return {
+            "rationale": "Mock planner intentionally returned allowlisted tools in an invalid order.",
+            "tool_calls": [
+                {"name": "extract_hazard_notes", "arguments": {}},
+                {"name": "resolve_location", "arguments": {}},
+                {"name": "load_geospatial_features", "arguments": {}},
+                {"name": "build_scene_config", "arguments": {}},
+                {"name": "load_planning_context", "arguments": {}},
+                {"name": "rank_risks", "arguments": {}},
+                {"name": "create_annotations", "arguments": {}},
+                {"name": "compile_review_pack", "arguments": {}},
+            ],
+        }
+    if scenario == "v2-valid":
+        return {
+            "rationale": "Mock planner selected the v2 durable runtime tool chain.",
+            "tool_calls": [
+                {"name": "resolve_location", "arguments": {}},
+                {"name": "load_geospatial_features", "arguments": {}},
+                {"name": "build_scene_config", "arguments": {}},
+                {"name": "load_planning_context", "arguments": {}},
+                {"name": "extract_hazard_notes", "arguments": {}},
+                {"name": "rank_risks", "arguments": {}},
+                {"name": "create_annotations", "arguments": {}},
+                {"name": "compile_review_pack", "arguments": {}},
+            ],
+        }
 
     return {
         "rationale": "Mock planner selected the bounded local 3D-RAMS tool chain.",
@@ -396,6 +477,75 @@ def _mock_bedrock_planner_synthesis(
         ]
     briefing["generation_mode"] = "llm-planner-mock"
     return briefing
+
+
+def _mock_bedrock_risk_reasoning(
+    hazards: list[dict[str, Any]],
+    evidence: list[dict[str, Any]],
+    executed_tools: list[str],
+) -> dict[str, Any]:
+    return {
+        "ranked_risks": [
+            {
+                "title": hazard.get("title", "Risk candidate"),
+                "reason": hazard.get("note", "Review this risk candidate against current source evidence."),
+                "confidence": hazard.get("confidence", "medium"),
+                "evidence_ids": hazard.get("evidenceIds", []),
+            }
+            for hazard in hazards[:5]
+        ],
+        "uncertainties": [
+            "Live source freshness is not guaranteed in the cached fixture path.",
+            "Human review is required before any RAMS or work-planning use.",
+        ],
+        "approval_required": True,
+        "executed_tools": executed_tools,
+        "evidence_count": len(evidence),
+    }
+
+
+def _normalise_reasoning(
+    parsed: dict[str, Any],
+    hazards: list[dict[str, Any]],
+    evidence: list[dict[str, Any]],
+) -> dict[str, Any]:
+    raw_risks = parsed.get("ranked_risks")
+    ranked: list[dict[str, Any]] = []
+    if isinstance(raw_risks, list):
+        for item in raw_risks[:6]:
+            if not isinstance(item, dict):
+                continue
+            ranked.append(
+                {
+                    "title": _text(item.get("title"), "Risk candidate"),
+                    "reason": _text(item.get("reason"), "Review this risk candidate against current source evidence."),
+                    "confidence": _text(item.get("confidence"), "medium"),
+                    "evidence_ids": _list(item.get("evidence_ids"), [], 5),
+                }
+            )
+    if not ranked:
+        ranked = [
+            {
+                "title": hazard.get("title", "Risk candidate"),
+                "reason": hazard.get("note", "Review this risk candidate against current source evidence."),
+                "confidence": hazard.get("confidence", "medium"),
+                "evidence_ids": hazard.get("evidenceIds", []),
+            }
+            for hazard in hazards[:5]
+        ]
+    return {
+        "ranked_risks": ranked,
+        "uncertainties": _list(
+            parsed.get("uncertainties"),
+            [
+                "Source freshness and completeness must be reviewed by a competent person.",
+                "This output is not certified RAMS, emergency guidance, or work approval.",
+            ],
+            5,
+        ),
+        "approval_required": bool(parsed.get("approval_required", True)),
+        "evidence_count": len(evidence),
+    }
 
 
 def _metadata(

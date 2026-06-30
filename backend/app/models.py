@@ -103,6 +103,19 @@ class ChatRequest(BaseModel):
     useBedrock: bool = Field(default=True)
 
 
+class RunCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    sessionId: str = Field(min_length=8, max_length=80)
+    message: str = Field(min_length=1, max_length=3000)
+    uploadedFileIds: list[str] = Field(default_factory=list, max_length=8)
+    useBedrock: bool = Field(default=True)
+    autoStart: bool = Field(
+        default=True,
+        description="When false, the run remains queued until a future worker/resume action starts it.",
+    )
+
+
 class SessionResponse(BaseModel):
     sessionId: str
     testerAlias: str | None

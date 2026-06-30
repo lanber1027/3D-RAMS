@@ -4,6 +4,8 @@ This page is a public-safe readiness snapshot for teammates, judges, and contrib
 
 3D-RAMS is ready for hosted access-code teammate testing. It is not a certified RAMS product, live planning portal product, emergency tool, or production deployment.
 
+Branch-local v2 durable runtime work is isolated on `feature/durable-runs-tool-loop` and does not replace the hosted MVP until it passes review and an explicit deploy gate.
+
 ## Current Status
 
 Current evidence snapshot:

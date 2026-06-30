@@ -7,8 +7,10 @@ import {
   GitBranch,
   KeyRound,
   MapPinned,
+  RefreshCw,
   Send,
   ShieldCheck,
+  Square,
 } from "lucide-react";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
@@ -169,7 +171,7 @@ function AccessPanel({ onStart, loading }) {
   );
 }
 
-function ChatPanel({ messages, prompt, setPrompt, onSend, loading, uploads, onMockUpload }) {
+function ChatPanel({ messages, prompt, setPrompt, onSend, loading, uploads, onMockUpload, activeRun, onCancel }) {
   return (
     <section className="agent-chat panel">
       <div className="panel-heading">
@@ -200,9 +202,15 @@ function ChatPanel({ messages, prompt, setPrompt, onSend, loading, uploads, onMo
       </div>
       <form className="composer" onSubmit={onSend}>
         <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
+        {activeRun && ["queued", "running"].includes(activeRun.status) && (
+          <button className="danger" type="button" onClick={onCancel}>
+            <Square size={16} />
+            Cancel
+          </button>
+        )}
         <button disabled={loading || !prompt.trim()}>
           <Send size={16} />
-          {loading ? "Running" : "Send"}
+          {loading ? "Queued" : "Send"}
         </button>
       </form>
     </section>
@@ -244,7 +252,44 @@ function RiskCards({ hazards, briefing }) {
   );
 }
 
-function EvidenceAndTrace({ evidence, trace, safety, runtime }) {
+function RunStatusBar({ runStatus, onResume, canResume }) {
+  const status = runStatus?.status || "ready";
+  const latestStep = runStatus?.currentStep || "not started";
+  const modelCalls = runStatus?.modelCallsUsed ?? 0;
+  const maxModelCalls = runStatus?.maxModelCalls ?? 0;
+  const maxToolCalls = runStatus?.maxToolCalls ?? 0;
+  return (
+    <section className="run-status-bar">
+      <article>
+        <span>Run status</span>
+        <strong>{status}</strong>
+      </article>
+      <article>
+        <span>Latest step</span>
+        <strong>{latestStep}</strong>
+      </article>
+      <article>
+        <span>Model calls</span>
+        <strong>{modelCalls}/{maxModelCalls}</strong>
+      </article>
+      <article>
+        <span>Tool cap</span>
+        <strong>{maxToolCalls || "ready"}</strong>
+      </article>
+      {canResume && (
+        <button className="secondary" type="button" onClick={onResume}>
+          <RefreshCw size={16} />
+          Resume latest run
+        </button>
+      )}
+    </section>
+  );
+}
+
+function EvidenceAndTrace({ evidence, trace, safety, runtime, runStatus }) {
+  const lifecycleTrace = toList(runStatus?.steps);
+  const toolTrace = toList(trace);
+  const visibleTrace = lifecycleTrace.length ? [...lifecycleTrace, ...toolTrace] : toolTrace;
   return (
     <section className="panel evidence-trace">
       <div className="panel-heading">
@@ -278,7 +323,7 @@ function EvidenceAndTrace({ evidence, trace, safety, runtime }) {
         </div>
         <div>
           <h3>Tool Timeline</h3>
-          {toList(trace).map((step, index) => (
+          {visibleTrace.map((step, index) => (
             <article className="compact-row trace" key={`${step.name}-${index}`}>
               <strong>{String(index + 1).padStart(2, "0")} · {step.name}</strong>
               <span>{step.summary}</span>
@@ -302,9 +347,11 @@ function App() {
   ]);
   const [prompt, setPrompt] = useState(STARTER_PROMPT);
   const [run, setRun] = useState(null);
+  const [runStatus, setRunStatus] = useState(null);
   const [uploads, setUploads] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const completedRunsRef = useRef(new Set());
 
   const ui = run?.uiState || {};
   const accessLabel = session?.accessLabel || "not started";
@@ -321,7 +368,9 @@ function App() {
         body: JSON.stringify(payload),
       });
       if (!response.ok) throw new Error(`Session start failed (${response.status})`);
-      setSession(await response.json());
+      const nextSession = await response.json();
+      setSession(nextSession);
+      localStorage.setItem("3drams-session", JSON.stringify(nextSession));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -338,7 +387,7 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`${API_BASE_URL}/api/chat`, {
+      const response = await fetch(`${API_BASE_URL}/api/runs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -346,24 +395,88 @@ function App() {
           message: userMessage.text,
           uploadedFileIds: uploads.map((upload) => upload.uploadId),
           useBedrock: true,
+          autoStart: true,
         }),
       });
       if (!response.ok) throw new Error(`Agent run failed (${response.status})`);
-      const result = await response.json();
-      setRun(result);
+      const status = await response.json();
+      localStorage.setItem("3drams-latest-run", status.runId);
+      applyRunStatus(status);
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
+  }
+
+  async function fetchRunStatus(runId) {
+    const response = await fetch(`${API_BASE_URL}/api/runs/${runId}`);
+    if (response.status === 404) {
+      localStorage.removeItem("3drams-latest-run");
+      throw new Error("Run not found. Start a fresh session if the backend restarted.");
+    }
+    if (!response.ok) throw new Error(`Run status failed (${response.status})`);
+    return response.json();
+  }
+
+  function applyRunStatus(status) {
+    setRunStatus(status);
+    const result = status.result || {
+      sessionId: status.sessionId,
+      runId: status.runId,
+      assistantMessage: status.errorSummary?.message || `Run ${status.status}: ${status.currentStep}`,
+      needsClarification: status.status === "waiting_for_clarification",
+      clarifyingQuestions: status.result?.clarifyingQuestions || [],
+      uiState: status.finalUiState || status.partialUiState || {},
+      runtime: status.runtime || {},
+      trace: status.partialUiState?.trace || status.steps || [],
+      evidence: status.partialUiState?.evidence || [],
+      scene: status.partialUiState?.scene || null,
+      annotations: status.partialUiState?.annotations || [],
+      briefing: status.partialUiState?.briefing || null,
+      safety: status.partialUiState?.safety || null,
+      modelCalls: [],
+      tokenUsage: null,
+    };
+    setRun(result);
+    if (["completed", "failed", "cancelled", "waiting_for_clarification"].includes(status.status) && !completedRunsRef.current.has(status.runId)) {
+      completedRunsRef.current.add(status.runId);
       setMessages((current) => [
         ...current,
         {
-          id: result.runId,
+          id: status.runId,
           role: "assistant",
           text: result.assistantMessage,
           questions: result.clarifyingQuestions || [],
         },
       ]);
+    }
+    if (!["queued", "running"].includes(status.status)) {
+      setLoading(false);
+    }
+  }
+
+  async function resumeLatestRun() {
+    const runId = localStorage.getItem("3drams-latest-run");
+    if (!runId) return;
+    setLoading(true);
+    setError("");
+    try {
+      applyRunStatus(await fetchRunStatus(runId));
     } catch (err) {
       setError(err.message);
-    } finally {
       setLoading(false);
+    }
+  }
+
+  async function cancelActiveRun() {
+    if (!runStatus?.runId) return;
+    setError("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/runs/${runStatus.runId}/cancel`, { method: "POST" });
+      if (!response.ok) throw new Error(`Cancel failed (${response.status})`);
+      applyRunStatus(await response.json());
+    } catch (err) {
+      setError(err.message);
     }
   }
 
@@ -382,6 +495,10 @@ function App() {
           sizeBytes: 2048,
         }),
       });
+      if (response.status === 404) {
+        localStorage.removeItem("3drams-session");
+        throw new Error("Session not found. Refresh and start a new test session.");
+      }
       if (!response.ok) throw new Error(`Upload registration failed (${response.status})`);
       const upload = await response.json();
       setUploads((current) => [...current, upload]);
@@ -394,11 +511,34 @@ function App() {
 
   useEffect(() => {
     if (session) return;
+    const cachedSession = localStorage.getItem("3drams-session");
+    if (cachedSession) {
+      try {
+        setSession(JSON.parse(cachedSession));
+        return;
+      } catch {
+        localStorage.removeItem("3drams-session");
+      }
+    }
     const cachedAlias = localStorage.getItem("3drams-tester-alias") || "";
     if (import.meta.env.DEV) {
       startSession({ accessCode: "", testerAlias: cachedAlias });
     }
   }, [session]);
+
+  useEffect(() => {
+    if (!runStatus?.runId || !["queued", "running"].includes(runStatus.status)) return undefined;
+    const timer = window.setInterval(async () => {
+      try {
+        applyRunStatus(await fetchRunStatus(runStatus.runId));
+      } catch (err) {
+        setError(err.message);
+        setLoading(false);
+        window.clearInterval(timer);
+      }
+    }, 1300);
+    return () => window.clearInterval(timer);
+  }, [runStatus?.runId, runStatus?.status]);
 
   if (!session) {
     return (
@@ -437,6 +577,12 @@ function App() {
 
       {error && <div className="error-banner">{error}</div>}
 
+      <RunStatusBar
+        runStatus={runStatus}
+        onResume={resumeLatestRun}
+        canResume={Boolean(localStorage.getItem("3drams-latest-run"))}
+      />
+
       <section className="product-grid">
         <ChatPanel
           messages={messages}
@@ -446,6 +592,8 @@ function App() {
           loading={loading}
           uploads={uploads}
           onMockUpload={registerMockUpload}
+          activeRun={runStatus}
+          onCancel={cancelActiveRun}
         />
         <section className="panel map-panel">
           <div className="panel-heading">
@@ -458,7 +606,7 @@ function App() {
 
       <section className="insight-grid">
         <RiskCards hazards={ui.hazards} briefing={ui.briefing} />
-        <EvidenceAndTrace evidence={ui.evidence} trace={ui.trace} safety={ui.safety} runtime={runtime} />
+        <EvidenceAndTrace evidence={ui.evidence} trace={ui.trace} safety={ui.safety} runtime={runtime} runStatus={runStatus} />
       </section>
     </main>
   );
