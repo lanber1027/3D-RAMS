@@ -11,6 +11,7 @@ The user opens the hosted frontend, enters a shared test access code, then asks 
 The backend runs the agent workflow server-side and returns:
 
 - assistant response;
+- location-resolution candidate cards when the site is named but unconfirmed;
 - 3D site risk scene;
 - risk review cards;
 - evidence register;
@@ -56,6 +57,7 @@ Implemented and hosted for the MVP:
 - Strands-ready backend dependency and orchestrator boundary, with existing deterministic tools still used as the current execution core;
 - server-side Bedrock/fallback boundary using Claude 3.7 Sonnet in `eu-west-2`;
 - visible map, evidence, trace, risk, and safety panels.
+- V3 location-resolution loop that pauses named-site-only prompts before review generation.
 
 Hosted MVP endpoints and resources:
 
@@ -73,18 +75,20 @@ Still deferred:
 - Cognito login;
 - richer live data adapters beyond current cached-public/synthetic fallback shape.
 
-## V2 Durable Runtime Branch
+## V3 Durable Runtime And Location Loop
 
-The `feature/durable-runs-tool-loop` branch adds durable run APIs without replacing this hosted MVP:
+The `feature/durable-runs-tool-loop` branch now carries the V3 runtime:
 
 - `POST /api/runs` creates a `runId` and initial checkpoint;
 - `GET /api/runs/{runId}` lets the frontend poll/reconnect;
+- `POST /api/runs/{runId}/confirm-location` confirms a source-labelled candidate before review tools start;
 - `POST /api/runs/{runId}/cancel` records cancellation;
+- named-site-only prompts enter `waiting_for_location_confirmation`;
 - the backend executes only allowlisted tools from a registry;
 - planner, reasoner, and compiler phases have separate token budgets;
-- the branch remains local/memory-backed until a separate v2 test stack is reviewed.
+- the run store remains local/memory-backed until a separate DynamoDB run table plus worker path is reviewed.
 
-Future AWS shape for v2 is API Gateway/Lambda to a DynamoDB run table, SQS queue, worker Lambda, Bedrock, and CloudWatch. Step Functions remains a later option if the workflow stabilizes into fixed auditable phases.
+Future AWS shape for this runtime is API Gateway/Lambda to a DynamoDB run table, SQS queue, worker Lambda, Bedrock, and CloudWatch. Step Functions remains a later option if the workflow stabilizes into fixed auditable phases.
 
 See [durable-runtime-v2.md](durable-runtime-v2.md).
 

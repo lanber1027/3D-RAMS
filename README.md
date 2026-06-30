@@ -2,9 +2,9 @@
 
 ![CI](https://github.com/Capitano00/3D-RAMS/actions/workflows/ci.yml/badge.svg)
 
-3D-RAMS is a hosted pre-visit agent product that turns a natural-language site visit request into an inspectable 3D review pack.
+3D-RAMS is a hosted pre-visit agent product that turns a natural-language site visit request with a confirmed location into an inspectable 3D review pack.
 
-The current rebuild makes chat the primary interface: a tester asks for a site visit briefing, the backend runs server-side tools, and the UI updates with a 3D risk scene, evidence register, trace, confidence/fallback notes, safety gate, and RAMS-style review pack for human review. Bedrock access stays server-side.
+The current V3 rebuild makes chat the primary interface: a tester asks for a site visit briefing, the backend resolves or confirms the site first, then runs server-side tools and updates the UI with a 3D risk scene, evidence register, trace, confidence/fallback notes, safety gate, and RAMS-style review pack for human review. Bedrock access stays server-side.
 
 ## Problem Statement
 
@@ -22,10 +22,10 @@ This rendered diagram is the README-scale view of the workflow in [docs/architec
 
 1. User starts a test session with a shared access code.
 2. User asks for a site visit review pack in natural language.
-3. Agent asks clarifying questions if the site/activity is missing.
-4. Backend resolves the site using live-first adapters or cached fallback fixtures.
-5. Agent registers uploaded PDF/image evidence metadata.
-6. Agent runs allowlisted location, context, weather, map, risk, briefing, and safety tools.
+3. Agent classifies the location input as coordinate, supported fixture, named-site-only, or insufficient.
+4. Named-site-only prompts enter a location-resolution stage before review generation.
+5. If candidates exist, the UI asks the user to confirm a candidate location; if not, it asks for postcode, coordinate, nearest town/road, or local authority.
+6. Only after a confirmed location does the agent register uploaded evidence metadata and run allowlisted location, context, map, risk, briefing, and safety tools.
 7. Backend optionally calls Amazon Bedrock server-side when enabled.
 8. UI updates chat, 3D scene, risk cards, evidence, trace, and safety boundary.
 9. Session/run metadata is shaped for DynamoDB evaluation tracing.
@@ -35,6 +35,7 @@ This rendered diagram is the README-scale view of the workflow in [docs/architec
 | Component | Demo1 Status | Notes |
 | --- | --- | --- |
 | Agent workflow | Real Python code | Chat session, tool sequence, evidence, trace, safety gate, deterministic fallback, and response shape are implemented. |
+| Location-resolution loop | Real V3 control flow with fixture-first resolver | Recognizable named-site prompts do not silently map to Lambeth. Candidate locations require user confirmation before the review workflow starts. Bilsbrae currently asks for more location detail because no reliable cached/public candidate is bundled. |
 | Public data pack | Cached public fixture | `fixtures/public-lambeth-thames` includes source metadata for a Lambeth / Thames public-data pack anchored on 8 Albert Embankment. Runtime makes no live public-data calls. |
 | Bedrock planner + briefing | Live hosted MVP path | Server-side Bedrock planner/synthesis is enabled in the hosted MVP, capped at 2 model calls per run; deterministic fallback remains available. |
 | 3D viewer | Real React/Vite + CesiumJS UI | Uses a token-free Cesium canvas plus local scene overlay and annotations. |
@@ -53,11 +54,11 @@ Ask the maintainer for the private test access code. Do not commit, paste into p
 
 The hosted product path is documented in [docs/hosted-aws-product.md](docs/hosted-aws-product.md). Use [docs/team-test-guide.md](docs/team-test-guide.md) for the current scenario checklist and feedback rules.
 
-Runtime v2 work is isolated on `feature/durable-runs-tool-loop`. It adds durable run APIs, checkpointed tool execution, polling/reconnect UX, and a 3-phase model-budget design without replacing the current hosted MVP. See [docs/durable-runtime-v2.md](docs/durable-runtime-v2.md).
+Runtime V3 work is isolated on `feature/durable-runs-tool-loop`. It adds durable run APIs, checkpointed tool execution, polling/reconnect UX, a 3-phase model-budget design, and a location-resolution/confirmation loop before review generation. See [docs/durable-runtime-v2.md](docs/durable-runtime-v2.md).
 
 No AWS, Google Maps, Cesium ion token, or real site data is required.
 
-The chat UI defaults to a public-safe Lambeth example when the prompt references 8 Albert Embankment or when local fallback needs a deterministic fixture.
+The chat UI uses the public-safe Lambeth fixture only when the prompt references the supported Lambeth / 8 Albert Embankment context or a maintainer explicitly selects that fixture in compatibility paths. Unknown named sites should not use Lambeth without confirmation.
 
 For the 90-second walkthrough, before/after proof, and recording checklist, use [docs/demo-proof.md](docs/demo-proof.md).
 

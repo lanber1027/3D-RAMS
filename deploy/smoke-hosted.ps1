@@ -57,7 +57,7 @@ $durableRun = Invoke-JsonPost "/api/runs" @{
 
 $durableRunId = $durableRun.runId
 for ($i = 0; $i -lt 30; $i++) {
-    if ($durableRun.status -in @("completed", "failed", "cancelled", "waiting_for_clarification", "waiting_for_approval")) { break }
+    if ($durableRun.status -in @("completed", "failed", "cancelled", "waiting_for_clarification", "waiting_for_location_confirmation", "waiting_for_approval")) { break }
     Start-Sleep -Seconds 2
     $durableRun = Invoke-RestMethod -Method Get -Uri "$base/api/runs/$durableRunId"
 }
@@ -71,7 +71,7 @@ $bilsbraeRun = Invoke-JsonPost "/api/runs" @{
 }
 $bilsbraeRunId = $bilsbraeRun.runId
 for ($i = 0; $i -lt 20; $i++) {
-    if ($bilsbraeRun.status -in @("completed", "failed", "cancelled", "waiting_for_clarification", "waiting_for_approval")) { break }
+    if ($bilsbraeRun.status -in @("completed", "failed", "cancelled", "waiting_for_clarification", "waiting_for_location_confirmation", "waiting_for_approval")) { break }
     Start-Sleep -Seconds 2
     $bilsbraeRun = Invoke-RestMethod -Method Get -Uri "$base/api/runs/$bilsbraeRunId"
 }
@@ -80,6 +80,29 @@ if (-not $bilsbraeRun.result.needsClarification) {
 }
 if ($bilsbraeRun.result.assistantMessage -match "Albert Embankment") {
     throw "Bilsbrae smoke regressed to the Lambeth fixture."
+}
+if ($bilsbraeRun.status -ne "waiting_for_location_confirmation") {
+    throw "Bilsbrae smoke expected V3 location-resolution stage."
+}
+
+$greenacreRun = Invoke-JsonPost "/api/runs" @{
+    sessionId = $session.sessionId
+    message = "I want to visit Greenacre Solar Farm tomorrow for a survey. Please prepare a pre-visit RAMS-style review pack."
+    uploadedFileIds = @()
+    useBedrock = $false
+    autoStart = $true
+}
+if ($greenacreRun.status -ne "waiting_for_location_confirmation") {
+    throw "Greenacre smoke expected candidate confirmation stage."
+}
+if (@($greenacreRun.result.locationCandidates).Count -lt 1) {
+    throw "Greenacre smoke expected at least one cached location candidate."
+}
+$greenacreConfirm = Invoke-JsonPost "/api/runs/$($greenacreRun.runId)/confirm-location" @{
+    candidateId = $greenacreRun.result.locationCandidates[0].candidateId
+}
+if ($greenacreConfirm.status -ne "completed") {
+    throw "Greenacre confirmation did not complete the review workflow."
 }
 
 $unsafe = $null
@@ -118,7 +141,13 @@ if ($IncludeUnsafe) {
     bilsbraeRunId = $bilsbraeRunId
     bilsbraeStatus = $bilsbraeRun.status
     bilsbraeNeedsClarification = $bilsbraeRun.result.needsClarification
+    bilsbraeNeedsLocationConfirmation = $bilsbraeRun.result.needsLocationConfirmation
+    bilsbraeNextStage = $bilsbraeRun.result.nextStage
     bilsbraeModelCallsUsed = $bilsbraeRun.modelCallsUsed
     bilsbraeMessage = $bilsbraeRun.result.assistantMessage
+    greenacreRunId = $greenacreRun.runId
+    greenacreCandidateCount = @($greenacreRun.result.locationCandidates).Count
+    greenacreConfirmedStatus = $greenacreConfirm.status
+    greenacreConfirmedLocation = $greenacreConfirm.result.uiState.location.label
     unsafeSafety = if ($unsafe) { $unsafe.safety.level } else { $null }
 } | ConvertTo-Json -Depth 8

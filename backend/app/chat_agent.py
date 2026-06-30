@@ -7,6 +7,7 @@ from typing import Any
 
 from .agent import run_site_briefing
 from .config import RuntimeConfig
+from .location_resolver import resolve_location_candidates
 from .session_store import add_run, get_session
 from .tools import trace_step
 
@@ -23,8 +24,20 @@ def run_fieldbrief_chat(
     session = get_session(session_id, config)
     run_id = f"run-{uuid.uuid4().hex[:12]}"
     agent_state = _agent_runtime_state()
-    request, parse_trace, clarification = _parse_message_to_request(message, uploaded_file_ids, use_bedrock)
+    request, parse_trace, clarification, location_resolution = _parse_message_to_request(message, uploaded_file_ids, use_bedrock)
 
+    if location_resolution:
+        response = _location_resolution_response(
+            run_id=run_id,
+            session=session,
+            location_resolution=location_resolution,
+            clarification=clarification,
+            parse_trace=parse_trace,
+            started=started,
+            agent_state=agent_state,
+        )
+        _record_run(session_id, response, config)
+        return response
     if clarification:
         response = _clarification_response(
             run_id=run_id,
@@ -87,7 +100,7 @@ def _parse_message_to_request(
     message: str,
     uploaded_file_ids: list[str],
     use_bedrock: bool,
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[str]]:
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[str], dict[str, Any] | None]:
     lower = message.lower()
     coordinate = _extract_coordinate(message)
     known_lambeth = any(term in lower for term in ["lambeth", "albert embankment", "thames", "8 albert"])
@@ -135,13 +148,17 @@ def _parse_message_to_request(
         return {}, trace, [
             "Which site should I assess? Please provide a site name, address, or coordinate.",
             "What is the planned visit activity, for example survey, inspection, delivery, or maintenance?",
-        ]
+        ], None
     if unresolved_named_site:
-        return {}, trace, [
-            f"I found the site name '{site_label}', but I do not have a trusted location for it yet.",
-            "Please provide a postcode, OS grid reference, latitude/longitude, or nearest town/council.",
-            "If you have public site evidence, register a synthetic/public PDF or image and rerun the request.",
+        location_resolution, resolver_trace = resolve_location_candidates(site_label, message)
+        trace.append(resolver_trace)
+        clarification = [
+            f"I found the site name '{site_label}', but I need a confirmed location before generating a review pack.",
+            "Please confirm one of the candidate cards, or provide a postcode, OS grid reference, latitude/longitude, nearest road/town, or local authority.",
         ]
+        if not location_resolution["locationCandidates"]:
+            clarification.append("No reliable cached/public candidate was found for this site name.")
+        return {}, trace, clarification, location_resolution
 
     request: dict[str, Any] = {
         "siteName": site_label,
@@ -157,7 +174,78 @@ def _parse_message_to_request(
         request["latitude"] = coordinate[0]
         request["longitude"] = coordinate[1]
         request["fixturePack"] = None
-    return request, trace, []
+    return request, trace, [], None
+
+
+def _location_resolution_response(
+    *,
+    run_id: str,
+    session: dict[str, Any],
+    location_resolution: dict[str, Any],
+    clarification: list[str],
+    parse_trace: list[dict[str, Any]],
+    started: float,
+    agent_state: dict[str, Any],
+) -> dict[str, Any]:
+    candidates = location_resolution.get("locationCandidates", [])
+    site_name = location_resolution.get("siteName")
+    if candidates:
+        assistant_message = (
+            f"I found {len(candidates)} possible location for {site_name}. "
+            "Please confirm the site before I run map, evidence, risk, or briefing tools."
+        )
+    else:
+        assistant_message = (
+            f"I could not find a reliable cached/public location candidate for {site_name}. "
+            "Please provide a postcode, OS grid reference, latitude/longitude, nearest road/town, or local authority."
+        )
+    safety = {
+        "allowed": True,
+        "level": "needs_input",
+        "message": "No briefing generated until the site location is confirmed.",
+    }
+    ui_state = {
+        "location": None,
+        "scene": None,
+        "annotations": [],
+        "hazards": [],
+        "evidence": [],
+        "sources": [],
+        "briefing": None,
+        "safety": safety,
+        "trace": parse_trace,
+        "architecture": None,
+        "locationResolution": location_resolution,
+    }
+    return {
+        "sessionId": session["sessionId"],
+        "runId": run_id,
+        "assistantMessage": assistant_message,
+        "needsClarification": True,
+        "needsLocationConfirmation": bool(candidates),
+        "locationCandidates": candidates,
+        "confirmedLocation": None,
+        "nextStage": location_resolution.get("nextStage"),
+        "clarifyingQuestions": clarification,
+        "agent": agent_state,
+        "uiState": ui_state,
+        "runtime": {
+            "hostedProductMode": True,
+            "briefingMode": "not-run",
+            "activeAgentMode": "location-resolution",
+            "sessionTraceMode": session.get("storageMode", "memory"),
+            "latencyMs": int((time.perf_counter() - started) * 1000),
+        },
+        "trace": parse_trace,
+        "evidence": [],
+        "scene": None,
+        "annotations": [],
+        "briefing": None,
+        "safety": safety,
+        "fallback": {"status": "available", "reason": "Agent can continue after location confirmation or extra location detail."},
+        "modelCalls": [],
+        "tokenUsage": None,
+    }
 
 
 def _clarification_response(
@@ -199,6 +287,7 @@ def _clarification_response(
             },
             "trace": parse_trace,
             "architecture": None,
+            "locationResolution": None,
         },
         "runtime": {
             "hostedProductMode": True,

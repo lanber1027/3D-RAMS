@@ -1,6 +1,6 @@
-# Durable Runtime V2 Branch
+# Durable Runtime V3 Branch
 
-This branch explores the next 3D-RAMS runtime shape without changing the current hosted MVP on `main`.
+This branch carries the current hosted V3 runtime shape for 3D-RAMS.
 
 Branch:
 
@@ -15,11 +15,12 @@ Move from a synchronous chat call toward a production-shaped agent runtime:
 - create a `runId` immediately;
 - persist run status and checkpoints;
 - expose polling/reconnect through `GET /api/runs/{runId}`;
+- pause named-site-only prompts for source-labelled location resolution and user confirmation;
 - validate all model-requested tools against an allowlist;
 - checkpoint after each major model/tool phase;
 - keep cancellation, fallback, trace, and safety boundaries visible.
 
-This is still a hackathon v2 branch. It is not production-ready and must not be merged, deployed over the hosted MVP, or shared as the live tester path without review.
+This is still a hackathon V3 runtime, not a production-ready system. It is deployed to the hosted teammate-test URL after review, but it must not be described as certified RAMS, emergency guidance, approval-to-work, or production-ready infrastructure.
 
 ## Gate 1 Architecture Decision
 
@@ -56,7 +57,7 @@ Rejected for Gate 1:
 - **Step Functions immediately**: strong for production orchestration, visual history, and retries, but higher deployment and state-machine overhead before the local run semantics are proven.
 - **Direct async Lambda only**: quick, but hides queue/backpressure behavior compared with the future SQS worker path.
 
-Current branch recommendation: prove the app-owned run lifecycle locally first, then deploy a separate v2 test stack using DynamoDB + SQS + worker Lambda only after review.
+Current branch recommendation: use the hosted V3 path for teammate testing, then implement true durable run persistence with DynamoDB + SQS + worker Lambda only after review.
 
 ## API Shape
 
@@ -80,6 +81,7 @@ Response includes:
 
 - `runId`;
 - `status`;
+- `locationResolution` when the run is waiting for site confirmation;
 - `currentStep`;
 - `modelCallsUsed`;
 - `maxModelCalls`;
@@ -100,6 +102,10 @@ Returns the latest checkpointed run state. The frontend uses this for polling an
 
 Marks queued/running work as cancelled. The worker checks cancellation before major model/tool phases.
 
+### `POST /api/runs/{runId}/confirm-location`
+
+Confirms one source-labelled candidate returned by the location resolver. The review workflow does not start until this confirmation happens.
+
 ## Run Statuses
 
 Supported statuses:
@@ -107,6 +113,7 @@ Supported statuses:
 - `queued`
 - `running`
 - `waiting_for_clarification`
+- `waiting_for_location_confirmation`
 - `waiting_for_approval`
 - `completed`
 - `failed`
@@ -116,7 +123,7 @@ Unsafe requests complete with a blocked safety result rather than pretending to 
 
 ## Tool Registry
 
-V2 introduces a registry where each tool declares:
+V3 uses a registry where each tool declares:
 
 - name;
 - description;
@@ -145,7 +152,7 @@ The LLM can request tool calls, but the backend executes only allowlisted tools.
 
 ## Model Budget
 
-The current live MVP remains configured for `2` calls/run. V2 supports a hard maximum of `3` calls/run when explicitly enabled:
+The current live MVP remains configured for `2` calls/run. The V3 runtime supports a hard maximum of `3` calls/run when explicitly enabled:
 
 | Phase | Purpose | Default output cap |
 | --- | --- | --- |
@@ -169,11 +176,12 @@ Cost controls:
 Implemented on this branch:
 
 - local memory run store;
-- `/api/runs`, `/api/runs/{runId}`, `/api/runs/{runId}/cancel`;
+- `/api/runs`, `/api/runs/{runId}`, `/api/runs/{runId}/confirm-location`, `/api/runs/{runId}/cancel`;
 - checkpointed durable runner;
 - allowlisted tool registry;
 - deterministic fallback path;
-- mocked Bedrock 3-call test path;
+- fixture-first location-resolution and confirmation loop before review generation;
+- mocked Bedrock model-call test path;
 - timeout enforcement between worker phases/tool calls;
 - dependency/order validation for model-requested tool plans;
 - frontend run-status bar;
@@ -183,17 +191,17 @@ Implemented on this branch:
 
 Still local/mock in this branch:
 
-- no separate v2 AWS stack;
+- no separate V3 AWS stack;
 - no real SQS queue yet;
 - no Step Functions state machine;
 - no DynamoDB run table separate from current session table;
-- no CloudWatch dashboard for v2 runs;
+- no CloudWatch dashboard for V3 durable runs;
 - no AgentCore Observability;
 - no production identity beyond the current shared-code MVP pattern.
 
 ## Safety Boundary
 
-3D-RAMS v2 still does not produce:
+3D-RAMS V3 still does not produce:
 
 - certified RAMS;
 - emergency guidance;

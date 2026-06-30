@@ -239,13 +239,20 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         result = response.json()
         self.assertTrue(result["needsClarification"])
+        self.assertFalse(result["needsLocationConfirmation"])
+        self.assertEqual(result["nextStage"], "provide_location_detail")
         self.assertIn("Bilsbrae Solar Farm", result["assistantMessage"])
+        self.assertEqual(result["runtime"]["activeAgentMode"], "location-resolution")
         self.assertEqual(result["scene"], None)
         self.assertEqual(result["evidence"], [])
+        self.assertEqual(result["locationCandidates"], [])
         parse_step = next(step for step in result["trace"] if step["name"] == "chat_parse_user_request")
         self.assertEqual(parse_step["status"], "warning")
         self.assertEqual(parse_step["output"]["siteResolution"], "unresolved")
         self.assertIsNone(parse_step["output"]["fixturePackSelected"])
+        resolver_step = next(step for step in result["trace"] if step["name"] == "resolve_location_candidates")
+        self.assertEqual(resolver_step["status"], "warning")
+        self.assertEqual(resolver_step["output"]["candidateCount"], 0)
 
     def test_chat_endpoint_coordinate_named_site_uses_synthetic_coordinate_not_lambeth(self):
         with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None):

@@ -12,9 +12,10 @@ The frontend never calls Bedrock directly. Hosted model calls, uploads, session 
 | `POST` | `/api/session/start` | Validates the shared access code and starts a tester session. |
 | `POST` | `/api/upload-url` | Registers PDF/image evidence and returns an S3 presigned upload URL when hosted storage is configured. |
 | `POST` | `/api/chat` | Runs the chat-first hosted agent workflow. |
-| `POST` | `/api/runs` | V2 branch: creates a durable run and returns run status/checkpoints. |
-| `GET` | `/api/runs/{runId}` | V2 branch: returns latest durable run status, partial/final UI state, and trace. |
-| `POST` | `/api/runs/{runId}/cancel` | V2 branch: requests cancellation for a queued/running durable run. |
+| `POST` | `/api/runs` | V3 branch: creates a durable run and returns run status/checkpoints. |
+| `GET` | `/api/runs/{runId}` | V3 branch: returns latest durable run status, partial/final UI state, location-resolution state, and trace. |
+| `POST` | `/api/runs/{runId}/confirm-location` | V3 branch: confirms a source-labelled location candidate and continues the review workflow. |
+| `POST` | `/api/runs/{runId}/cancel` | V3 branch: requests cancellation for a queued/running durable run. |
 | `GET` | `/api/session/{sessionId}` | Returns session metadata and run summaries for refresh/debug. |
 | `POST` | `/api/run` | Compatibility route for the older coordinate-to-briefing workflow. |
 | `GET` | `/openapi.json` | Returns the generated OpenAPI schema from FastAPI. |
@@ -76,6 +77,10 @@ Important response fields:
 | --- | --- |
 | `assistantMessage` | Natural-language agent response. |
 | `needsClarification` | Whether the agent needs more site/activity information before running tools. |
+| `needsLocationConfirmation` | Whether a named-site prompt has candidate locations that must be confirmed before review tools run. |
+| `locationCandidates` | Source-labelled candidate locations when the fixture-first resolver finds them. |
+| `confirmedLocation` | Confirmed candidate location, otherwise `null`. |
+| `nextStage` | `confirm_location`, `provide_location_detail`, or the next workflow stage. |
 | `clarifyingQuestions` | Questions for the user when needed. |
 | `uiState` | Map, annotations, hazards, evidence, sources, briefing, safety, trace, and architecture data for the frontend panels. |
 | `runtime` | Hosted mode, Bedrock/fallback mode, latency, and session trace mode. |
@@ -87,7 +92,7 @@ Important response fields:
 
 `POST /api/runs`
 
-The v2 branch uses this endpoint instead of a long synchronous chat request. It creates a `runId`, stores a checkpointed run record, and lets the frontend poll with `GET /api/runs/{runId}`.
+The V3 branch uses this endpoint instead of a long synchronous chat request. It creates a `runId`, stores a checkpointed run record, and lets the frontend poll with `GET /api/runs/{runId}`. Named-site-only prompts run a location-resolution stage before any map/evidence/risk/briefing tools start.
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -102,19 +107,43 @@ Important run-status fields:
 | Field | Meaning |
 | --- | --- |
 | `runId` | Opaque run id used for polling/reconnect. |
-| `status` | `queued`, `running`, `waiting_for_clarification`, `waiting_for_approval`, `completed`, `failed`, or `cancelled`. |
+| `status` | `queued`, `running`, `waiting_for_clarification`, `waiting_for_location_confirmation`, `waiting_for_approval`, `completed`, `failed`, or `cancelled`. |
 | `currentStep` | Latest lifecycle step. |
 | `modelCallsUsed` / `maxModelCalls` | Model-call budget accounting. |
 | `tokenBudget` | Planner, reasoner, and compiler output-token caps. |
 | `steps` | Checkpointed lifecycle/model/tool steps. |
 | `toolResults` | Sanitized allowlisted tool outputs. |
 | `partialUiState` | Latest UI panels available during execution. |
+| `locationResolution` | Site name, candidate list, resolver mode, confirmation state, and next stage when the run is waiting for location confirmation. |
 | `finalUiState` | Final UI panels when complete. |
 | `safetyResult` | Final safety gate result when available. |
 | `fallbackReason` | Reason the deterministic/default path was used. |
 | `errorSummary` | Safe error summary for failed runs. |
 
 The current branch implementation uses a local memory run store. Future AWS deployment should use a separate DynamoDB run table plus SQS worker Lambda after review.
+
+## Location Confirmation
+
+`POST /api/runs/{runId}/confirm-location`
+
+Use this only when a run is in `waiting_for_location_confirmation` and returned one or more `locationCandidates`.
+
+Request:
+
+```json
+{
+  "candidateId": "candidate-greenacre-solar-demo"
+}
+```
+
+Response:
+
+- returns the updated run record;
+- moves the run into the review workflow;
+- no review pack, risk cards, or evidence are produced before this confirmation;
+- invalid candidate ids return a safe `400` error.
+
+The current MVP resolver is fixture-first. It may return a clearly labelled synthetic candidate for demo paths, but it must not fabricate real-world coordinates from the LLM. If no reliable cached/public candidate exists, the run asks the user for postcode, coordinate, nearest road/town, or local authority.
 
 ## Compatibility Run Request
 

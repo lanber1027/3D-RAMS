@@ -4,7 +4,7 @@ This page is a public-safe readiness snapshot for teammates, judges, and contrib
 
 3D-RAMS is ready for hosted access-code teammate testing. It is not a certified RAMS product, live planning portal product, emergency tool, or production deployment.
 
-Branch-local v2 durable runtime work is isolated on `feature/durable-runs-tool-loop` and does not replace the hosted MVP until it passes review and an explicit deploy gate.
+Hosted V3 runtime work is isolated on `feature/durable-runs-tool-loop` and currently powers the access-code teammate test path after review-gated deployment.
 
 ## Current Status
 
@@ -26,6 +26,7 @@ Current evidence snapshot:
 | Safety gate | Verified for demo boundary | Unsafe certified RAMS/work-approval requests are blocked in tests and evaluation. |
 | CI | Active | GitHub Actions runs the local verification stack on push and pull request. |
 | Hosted Bedrock | Live in hosted MVP | Server-side Lambda calls Bedrock after access-code validation; deterministic fallback remains available. |
+| Location confirmation | Verified in V3 tests | Named-site-only prompts enter a location-resolution stage and do not generate a review pack before confirmation or stronger location detail. |
 
 ## One-Command Checks
 

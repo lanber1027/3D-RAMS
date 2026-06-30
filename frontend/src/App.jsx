@@ -26,11 +26,11 @@ function toList(value) {
 function SceneViewer({ scene, annotations, location }) {
   const containerRef = useRef(null);
   const [renderError, setRenderError] = useState("");
-  const [renderStatus, setRenderStatus] = useState("waiting for resolved location");
+  const [renderStatus, setRenderStatus] = useState("waiting for confirmed location");
 
   useEffect(() => {
     setRenderError("");
-    setRenderStatus(scene?.center ? "rendering 3D scene" : "waiting for resolved location");
+    setRenderStatus(scene?.center ? "rendering 3D scene" : "waiting for confirmed location");
     if (!containerRef.current || !scene?.center) return undefined;
 
     Cesium.Ion.defaultAccessToken = "";
@@ -121,8 +121,8 @@ function SceneViewer({ scene, annotations, location }) {
     return (
       <div className="empty-map">
         <MapPinned size={24} />
-        <strong>waiting for resolved location</strong>
-        <span>Provide a coordinate, postcode, nearest town, or supported fixture before the map tools run.</span>
+        <strong>waiting for confirmed location</strong>
+        <span>Confirm a candidate site or provide a coordinate, postcode, nearest town, or supported fixture before the map tools run.</span>
       </div>
     );
   }
@@ -307,6 +307,69 @@ function RiskCards({ hazards, briefing }) {
   );
 }
 
+function LocationConfirmationPanel({ resolution, onConfirm, onReject, onManual, loading }) {
+  if (!resolution?.siteName && !toList(resolution?.locationCandidates).length) return null;
+  const candidates = toList(resolution.locationCandidates);
+  return (
+    <section className="panel location-confirmation-panel">
+      <div className="panel-heading">
+        <MapPinned size={18} />
+        <h2>Confirm Site Location</h2>
+      </div>
+      <p className="confirmation-copy">
+        {candidates.length
+          ? "The agent found source-labelled candidate locations. Confirm one before map, evidence, risk, or briefing tools run."
+          : "The agent searched the cached resolver but did not find a reliable candidate. Provide stronger location detail to continue."}
+      </p>
+      {candidates.length > 0 ? (
+        <div className="candidate-grid">
+          {candidates.map((candidate) => (
+            <article key={candidate.candidateId} className="candidate-card">
+              <div>
+                <strong>{candidate.name}</strong>
+                <span>{candidate.confidence || "review"} confidence</span>
+              </div>
+              <dl>
+                <div>
+                  <dt>Nearest town/road</dt>
+                  <dd>{candidate.nearestTown || candidate.nearestRoad || "not available"}</dd>
+                </div>
+                <div>
+                  <dt>Authority</dt>
+                  <dd>{candidate.countyOrAuthority || "not available"}</dd>
+                </div>
+                <div>
+                  <dt>Postcode area</dt>
+                  <dd>{candidate.postcodeArea || "not available"}</dd>
+                </div>
+                <div>
+                  <dt>Approx coordinate</dt>
+                  <dd>{candidate.latitude}, {candidate.longitude}</dd>
+                </div>
+              </dl>
+              <p>{candidate.reason || "Candidate requires human confirmation before use."}</p>
+              <small>{candidate.source || "source pending"} - {candidate.dataMode || "source-labelled"}</small>
+              <div className="candidate-actions">
+                <button type="button" onClick={() => onConfirm(candidate.candidateId)} disabled={loading}>
+                  Confirm this site
+                </button>
+                <button className="secondary" type="button" onClick={onReject} disabled={loading}>
+                  Not this site
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="empty-copy">No reliable cached/public candidate was found for {resolution.siteName}. The review workflow has not started.</p>
+      )}
+      <button className="secondary" type="button" onClick={onManual} disabled={loading}>
+        Enter coordinates manually
+      </button>
+    </section>
+  );
+}
+
 function RunStatusBar({ runStatus, onResume, canResume }) {
   const status = runStatus?.status || "ready";
   const latestStep = runStatus?.currentStep || "not started";
@@ -411,6 +474,7 @@ function App() {
   const ui = run?.uiState || {};
   const accessLabel = session?.accessLabel || "not started";
   const runtime = run?.runtime || {};
+  const locationResolution = run?.locationResolution || ui.locationResolution || null;
   const safetyTone = ui.safety?.allowed === false ? "blocked" : ui.safety?.level === "needs_input" ? "warning" : "allowed";
 
   async function startSession(payload) {
@@ -493,7 +557,7 @@ function App() {
       tokenUsage: null,
     };
     setRun(result);
-    if (["completed", "failed", "cancelled", "waiting_for_clarification"].includes(status.status) && !completedRunsRef.current.has(status.runId)) {
+    if (["completed", "failed", "cancelled", "waiting_for_clarification", "waiting_for_location_confirmation"].includes(status.status) && !completedRunsRef.current.has(status.runId)) {
       completedRunsRef.current.add(status.runId);
       setMessages((current) => [
         ...current,
@@ -533,6 +597,33 @@ function App() {
     } catch (err) {
       setError(err.message);
     }
+  }
+
+  async function confirmLocation(candidateId) {
+    if (!runStatus?.runId) return;
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/runs/${runStatus.runId}/confirm-location`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidateId }),
+      });
+      if (!response.ok) throw new Error(`Location confirmation failed (${response.status})`);
+      applyRunStatus(await response.json());
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
+  }
+
+  function rejectLocationCandidate() {
+    setPrompt("This is not the right site. The nearest town/council/postcode is ");
+  }
+
+  function enterCoordinatesManually() {
+    const siteName = locationResolution?.siteName || "the site";
+    setPrompt(`I want to visit ${siteName} at <latitude>, <longitude> tomorrow for a survey. Please prepare a pre-visit RAMS-style review pack.`);
   }
 
   async function registerMockUpload() {
@@ -658,6 +749,14 @@ function App() {
           <SceneViewer scene={ui.scene} annotations={ui.annotations} location={ui.location} />
         </section>
       </section>
+
+      <LocationConfirmationPanel
+        resolution={locationResolution}
+        onConfirm={confirmLocation}
+        onReject={rejectLocationCandidate}
+        onManual={enterCoordinatesManually}
+        loading={loading}
+      />
 
       <section className="insight-grid">
         <RiskCards hazards={ui.hazards} briefing={ui.briefing} />

@@ -14,6 +14,7 @@ from .bedrock_adapter import (
 from .chat_agent import _agent_runtime_state, _compose_assistant_message, _parse_message_to_request, _upload_trace
 from .config import RuntimeConfig
 from .fixtures import load_fixture_pack
+from .location_resolver import confirmed_location_to_request, public_candidate_by_id
 from .run_store import (
     append_step,
     append_tool_result,
@@ -29,7 +30,7 @@ from .tool_registry import ToolExecutionError, default_tool_sequence, execute_to
 from .tools import architecture_snapshot, normalize_request, source_register, trace_step
 
 
-TERMINAL_STATUSES = {"completed", "failed", "cancelled", "waiting_for_clarification", "waiting_for_approval"}
+TERMINAL_STATUSES = {"completed", "failed", "cancelled", "waiting_for_clarification", "waiting_for_location_confirmation", "waiting_for_approval"}
 
 _TOOL_ALIASES = {
     "fetch_geospatial_features": "load_geospatial_features",
@@ -72,6 +73,50 @@ def cancel_durable_run(run_id: str) -> dict[str, Any]:
     return request_cancel(run_id)
 
 
+def confirm_location_for_run(run_id: str, candidate_id: str, config: RuntimeConfig) -> dict[str, Any]:
+    run = get_run_record(run_id)
+    if run["status"] != "waiting_for_location_confirmation":
+        raise ToolExecutionError("Run is not waiting for location confirmation.")
+    location_resolution = run.get("locationResolution") or {}
+    candidate = public_candidate_by_id(candidate_id, location_resolution.get("locationCandidates", []))
+    if not candidate:
+        raise ToolExecutionError("Location candidate was not found for this run.")
+    original_use_bedrock = bool(run["request"]["useBedrock"])
+    if config.bedrock_requested != original_use_bedrock:
+        config = replace(
+            config,
+            bedrock_requested=original_use_bedrock,
+            bedrock_enabled=config.bedrock_enabled and original_use_bedrock,
+        )
+    append_step(
+        run_id,
+        name="location_confirmation",
+        status="ok",
+        summary="User confirmed a source-labelled candidate location before review tools started.",
+        output={
+            "candidateId": candidate.get("candidateId"),
+            "name": candidate.get("name"),
+            "confidence": candidate.get("confidence"),
+            "source": candidate.get("source"),
+            "dataMode": candidate.get("dataMode"),
+        },
+    )
+    update_run(
+        run_id,
+        status="running",
+        currentStep="location_confirmation",
+        confirmedLocation=candidate,
+        locationResolution={
+            **location_resolution,
+            "needsLocationConfirmation": False,
+            "confirmedLocation": candidate,
+            "nextStage": "run_review_workflow",
+        },
+    )
+    execute_durable_run(run_id, config)
+    return public_run(get_run_record(run_id))
+
+
 def execute_durable_run(run_id: str, config: RuntimeConfig) -> None:
     started = time.perf_counter()
     deadline = started + config.durable_run_timeout_seconds
@@ -85,12 +130,39 @@ def execute_durable_run(run_id: str, config: RuntimeConfig) -> None:
 
     update_run(run_id, status="running", currentStep="parse_request")
     append_step(run_id, name="parse_request", status="running", summary="Parsing natural-language request.")
-    request, parse_trace, clarification = _parse_message_to_request(
-        run["request"]["message"],
-        run["request"]["uploadedFileIds"],
-        bool(run["request"]["useBedrock"]),
-    )
+    if run.get("confirmedLocation"):
+        request = confirmed_location_to_request(
+            run["confirmedLocation"],
+            message=run["request"]["message"],
+            use_bedrock=bool(run["request"]["useBedrock"]),
+        )
+        parse_trace = [
+            trace_step(
+                "parse_user_request",
+                "ok",
+                "Using the user-confirmed location candidate to start the review workflow.",
+                {
+                    "siteName": request.get("siteName"),
+                    "confirmedLocation": run["confirmedLocation"].get("candidateId"),
+                    "locationConfidence": run["confirmedLocation"].get("confidence"),
+                    "source": run["confirmedLocation"].get("source"),
+                    "nextStage": "run_review_workflow",
+                },
+                source_ids=[run["confirmedLocation"].get("source")] if run["confirmedLocation"].get("source") else [],
+            )
+        ]
+        clarification: list[str] = []
+        location_resolution = None
+    else:
+        request, parse_trace, clarification, location_resolution = _parse_message_to_request(
+            run["request"]["message"],
+            run["request"]["uploadedFileIds"],
+            bool(run["request"]["useBedrock"]),
+        )
     _merge_trace(run_id, parse_trace)
+    if location_resolution:
+        _finish_location_confirmation(run_id, location_resolution, clarification, started, config)
+        return
     if clarification:
         _finish_clarification(run_id, clarification, started, config)
         return
@@ -392,6 +464,8 @@ def _compile_output(
             "durableRunApi": True,
             "activeAgentMode": "durable-tool-loop",
             "modelCallCount": run["modelCallsUsed"],
+            "fixturePack": context["fixturePack"]["name"] if context.get("fixturePack") else None,
+            "fixturePackMode": "cached-public-fixture" if context.get("fixturePack") else "synthetic-default",
             "sessionTraceMode": "memory",
             "latencyMs": int((time.perf_counter() - started) * 1000),
         }
@@ -526,6 +600,90 @@ def _finish_clarification(
         safetyResult=ui_state["safety"],
         result=result,
         runtime=runtime,
+    )
+    _record_session_run_summary(run_id, result, config)
+
+
+def _finish_location_confirmation(
+    run_id: str,
+    location_resolution: dict[str, Any],
+    clarification: list[str],
+    started: float,
+    config: RuntimeConfig,
+) -> None:
+    run = get_run_record(run_id)
+    trace = [
+        *run.get("steps", []),
+        *list(run.get("partialUiState", {}).get("trace") or []),
+    ]
+    candidates = location_resolution.get("locationCandidates", [])
+    site_name = location_resolution.get("siteName")
+    if candidates:
+        assistant_message = (
+            f"I found {len(candidates)} possible location for {site_name}. "
+            "Please confirm the site before I run map, evidence, risk, or briefing tools."
+        )
+        status = "waiting_for_location_confirmation"
+    else:
+        assistant_message = (
+            f"I could not find a reliable cached/public location candidate for {site_name}. "
+            "Please provide a postcode, OS grid reference, latitude/longitude, nearest road/town, or local authority."
+        )
+        status = "waiting_for_location_confirmation"
+    safety = {"allowed": True, "level": "needs_input", "message": "No briefing generated until the site location is confirmed."}
+    ui_state = {
+        "location": None,
+        "scene": None,
+        "annotations": [],
+        "hazards": [],
+        "evidence": [],
+        "sources": [],
+        "briefing": None,
+        "safety": safety,
+        "trace": trace,
+        "architecture": None,
+        "locationResolution": location_resolution,
+    }
+    runtime = {
+        "hostedProductMode": True,
+        "durableRunApi": True,
+        "briefingMode": "not-run",
+        "activeAgentMode": "location-resolution",
+        "modelCallCount": 0,
+        "latencyMs": int((time.perf_counter() - started) * 1000),
+    }
+    result = {
+        "sessionId": run["sessionId"],
+        "runId": run_id,
+        "assistantMessage": assistant_message,
+        "needsClarification": True,
+        "needsLocationConfirmation": bool(candidates),
+        "locationCandidates": candidates,
+        "confirmedLocation": None,
+        "nextStage": location_resolution.get("nextStage"),
+        "clarifyingQuestions": clarification,
+        "agent": _agent_runtime_state(),
+        "uiState": ui_state,
+        "runtime": runtime,
+        "trace": trace,
+        "evidence": [],
+        "scene": None,
+        "annotations": [],
+        "briefing": None,
+        "safety": safety,
+        "fallback": {"status": "available", "reason": "Agent can continue after location confirmation or extra location detail."},
+        "modelCalls": [],
+        "tokenUsage": None,
+    }
+    update_run(
+        run_id,
+        status=status,
+        currentStep="location_confirmation",
+        partialUiState=ui_state,
+        safetyResult=safety,
+        result=result,
+        runtime=runtime,
+        locationResolution=location_resolution,
     )
     _record_session_run_summary(run_id, result, config)
 

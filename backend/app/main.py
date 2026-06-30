@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, Header
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .access import validate_access_code
 from .agent import run_site_briefing
 from .chat_agent import run_fieldbrief_chat
 from .config import RuntimeConfig
-from .durable_runner import cancel_durable_run, create_durable_run, read_durable_run
+from .durable_runner import cancel_durable_run, confirm_location_for_run, create_durable_run, read_durable_run
 from .hosted_logging import log_event, now_ms
-from .models import ChatRequest, HealthResponse, RunCreateRequest, SessionStartRequest, SiteBriefRequest, UploadUrlRequest
+from .models import ChatRequest, HealthResponse, LocationConfirmRequest, RunCreateRequest, SessionStartRequest, SiteBriefRequest, UploadUrlRequest
 from .session_store import create_session, get_session, public_session
 from .upload_service import create_upload_target
 
@@ -164,6 +164,25 @@ def cancel_run(run_id: str) -> dict[str, object]:
         sessionId=result.get("sessionId"),
         runId=run_id,
         status=result.get("status"),
+        latencyMs=now_ms() - started,
+    )
+    return result
+
+
+@app.post("/api/runs/{run_id}/confirm-location", status_code=202)
+def confirm_run_location(run_id: str, payload: LocationConfirmRequest) -> dict[str, object]:
+    started = now_ms()
+    config = RuntimeConfig.from_env(request_bedrock=True)
+    try:
+        result = confirm_location_for_run(run_id, payload.candidateId, config)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    log_event(
+        "durable_run_location_confirm",
+        sessionId=result.get("sessionId"),
+        runId=run_id,
+        status=result.get("status"),
+        candidateId=payload.candidateId,
         latencyMs=now_ms() - started,
     )
     return result

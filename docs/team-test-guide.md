@@ -8,20 +8,21 @@ Hosted MVP URL:
 
 Ask the maintainer for the private test access code. Do not post the access code in GitHub issues, chat screenshots, public docs, or demo recordings.
 
-3D-RAMS turns a coordinate into an inspectable 3D pre-visit briefing pack. The default UI uses the cached `public-lambeth-thames` fixture pack for a Lambeth / Thames public-data example anchored on 8 Albert Embankment. It does not call live Planning Data, OpenStreetMap, Environment Agency, Lambeth, TfL, Google, or OS services during the demo.
+3D-RAMS turns a confirmed site location into an inspectable 3D pre-visit briefing pack. The default UI uses the cached `public-lambeth-thames` fixture pack for a Lambeth / Thames public-data example anchored on 8 Albert Embankment. Unknown named sites now enter a V3 location-resolution loop first; the agent must either show source-labelled candidates for confirmation or ask for postcode, coordinates, nearest town/road, or local authority. It does not call live Planning Data, OpenStreetMap, Environment Agency, Lambeth, TfL, Google, or OS services during the demo.
 
 1. shared-code session start;
 2. natural-language site visit request;
 3. optional clarifying questions;
 4. location/site resolution;
-5. optional PDF/image evidence registration;
-6. cached-public, synthetic, or fallback geospatial/context features;
-7. 3D risk scene and annotations;
-8. RAMS-style review pack;
-9. optional server-side Bedrock planning/synthesis;
-10. safety gate;
-11. deterministic fallback if live sources/model path are unavailable;
-12. evidence register, trace, and architecture visualizer.
+5. user confirmation when the site is named but not yet trusted;
+6. optional PDF/image evidence registration;
+7. cached-public, synthetic, or fallback geospatial/context features;
+8. 3D risk scene and annotations;
+9. RAMS-style review pack;
+10. optional server-side Bedrock planning/synthesis;
+11. safety gate;
+12. deterministic fallback if live sources/model path are unavailable;
+13. evidence register, trace, and architecture visualizer.
 
 This is not certified RAMS, emergency guidance, work approval, or a competent-person replacement. Treat all output as a demo briefing for human review.
 
@@ -46,12 +47,26 @@ Steps:
    I want to visit 8 Albert Embankment tomorrow for a survey. Please prepare a pre-visit RAMS-style review pack.
    ```
 
-4. If the agent asks clarifying questions, answer them in chat.
-5. Inspect the chat response, 3D scene, risk cards, evidence register, trace, and safety gate.
-6. Register only public/synthetic PDFs or images if asked to test uploads.
-7. Submit feedback through `Issues -> New Issue -> Teammate Demo Feedback`.
+4. If the agent shows candidate location cards, confirm one before expecting a 3D review pack.
+5. If the agent cannot find a reliable candidate, provide a postcode, coordinate, nearest town/road, or local authority.
+6. Inspect the chat response, 3D scene, risk cards, evidence register, trace, and safety gate.
+7. Register only public/synthetic PDFs or images if asked to test uploads.
+8. Submit feedback through `Issues -> New Issue -> Teammate Demo Feedback`.
 
 Do not upload real client data, private documents, secrets, API keys, or confidential site records.
+
+## V3 Location-Resolution Checks
+
+Use these prompts to test the location gate:
+
+| Scenario | Prompt | Expected result |
+| --- | --- | --- |
+| Supported public fixture | `I want to visit 8 Albert Embankment tomorrow for a survey. Please prepare a pre-visit RAMS-style review pack.` | Runs the cached Lambeth workflow and renders the 3D scene. |
+| Unknown named site | `I want to visit Bilsbrae Solar Farm tomorrow for a survey. Please prepare a pre-visit RAMS-style review pack.` | Does not use Lambeth; enters location-resolution stage and asks for more location detail because no reliable cached/public candidate is bundled. |
+| Candidate confirmation demo | `I want to visit Greenacre Solar Farm tomorrow for a survey. Please prepare a pre-visit RAMS-style review pack.` | Shows a clearly synthetic candidate card; confirm it to run the review workflow. |
+| Coordinate path | `I want to visit Bilsbrae Solar Farm tomorrow at 56.1234, -3.4567 for a survey.` | Skips candidate search and runs a low-confidence coordinate-based synthetic review pack. |
+
+No RAMS-style review pack, risk cards, evidence, or map annotations should be generated before location confirmation for named-site-only prompts.
 
 ## Local Maintainer Walkthrough
 

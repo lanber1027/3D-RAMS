@@ -39,7 +39,7 @@ class DurableRunApiTests(unittest.TestCase):
         self.client = TestClient(app)
 
     def _session(self):
-        return self.client.post("/api/session/start", json={"testerAlias": "qa-v2"}).json()
+        return self.client.post("/api/session/start", json={"testerAlias": "qa-v3"}).json()
 
     def _run(self, session_id, message, **overrides):
         payload = {
@@ -85,7 +85,7 @@ class DurableRunApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(result["result"]["clarifyingQuestions"]), 1)
         self.assertEqual(result["modelCallsUsed"], 0)
 
-    def test_durable_run_clarifies_unknown_named_site_without_coordinate(self):
+    def test_durable_run_enters_location_resolution_for_unknown_named_site_without_coordinate(self):
         with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None, DURABLE_RUN_PROCESS_INLINE="true"):
             session = self._session()
             response = self._run(
@@ -95,13 +95,49 @@ class DurableRunApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 202)
         result = response.json()
-        self.assertEqual(result["status"], "waiting_for_clarification")
+        self.assertEqual(result["status"], "waiting_for_location_confirmation")
         self.assertTrue(result["result"]["needsClarification"])
+        self.assertFalse(result["result"]["needsLocationConfirmation"])
+        self.assertEqual(result["result"]["nextStage"], "provide_location_detail")
+        self.assertEqual(result["result"]["locationCandidates"], [])
         self.assertIn("Bilsbrae Solar Farm", result["result"]["assistantMessage"])
         self.assertIsNone(result["result"]["scene"])
+        self.assertEqual(result["result"]["evidence"], [])
         parse_step = next(step for step in result["result"]["trace"] if step["name"] == "chat_parse_user_request")
         self.assertEqual(parse_step["output"]["siteResolution"], "unresolved")
         self.assertIsNone(parse_step["output"]["fixturePackSelected"])
+        resolver_step = next(step for step in result["result"]["trace"] if step["name"] == "resolve_location_candidates")
+        self.assertEqual(resolver_step["status"], "warning")
+        self.assertEqual(resolver_step["output"]["candidateCount"], 0)
+
+    def test_durable_run_confirms_cached_location_candidate_before_review_workflow(self):
+        with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None, DURABLE_RUN_PROCESS_INLINE="true"):
+            session = self._session()
+            response = self._run(
+                session["sessionId"],
+                "I want to visit Greenacre Solar Farm tomorrow for a survey. Please prepare a pre-visit RAMS-style review pack.",
+            )
+            created = response.json()
+            confirm = self.client.post(
+                f"/api/runs/{created['runId']}/confirm-location",
+                json={"candidateId": "candidate-greenacre-solar-demo"},
+            )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(created["status"], "waiting_for_location_confirmation")
+        self.assertTrue(created["result"]["needsLocationConfirmation"])
+        self.assertEqual(created["result"]["nextStage"], "confirm_location")
+        self.assertEqual(len(created["result"]["locationCandidates"]), 1)
+        self.assertEqual(created["result"]["evidence"], [])
+
+        self.assertEqual(confirm.status_code, 202)
+        result = confirm.json()
+        self.assertEqual(result["status"], "completed")
+        self.assertFalse(result["result"]["needsClarification"])
+        self.assertEqual(result["result"]["uiState"]["location"]["label"], "Greenacre Solar Farm")
+        self.assertIsNone(result["result"]["runtime"]["fixturePack"])
+        self.assertEqual(result["result"]["runtime"]["fixturePackMode"], "synthetic-default")
+        self.assertNotIn("8 Albert Embankment", result["result"]["assistantMessage"])
 
     def test_durable_run_safety_blocks_certified_rams_request(self):
         with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None, DURABLE_RUN_PROCESS_INLINE="true"):

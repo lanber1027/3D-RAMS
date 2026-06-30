@@ -511,6 +511,86 @@ textarea {
   font-size: 0.82rem;
 }
 
+.location-confirmation-panel {
+  margin-top: 16px;
+}
+
+.confirmation-copy {
+  margin: 0;
+  padding: 0 16px 14px;
+  color: #40564f;
+  font-weight: 700;
+}
+
+.candidate-grid {
+  display: grid;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.candidate-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d8e3de;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fbfcfb;
+}
+
+.candidate-card > div:first-child,
+.candidate-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.candidate-card > div:first-child span {
+  border: 1px solid #bed3ca;
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: #0b6f65;
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.candidate-card dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.candidate-card dl div {
+  border: 1px solid #e2e9e5;
+  border-radius: 8px;
+  padding: 8px;
+  background: #ffffff;
+}
+
+.candidate-card dt {
+  color: #65766f;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.candidate-card dd,
+.candidate-card p {
+  margin: 3px 0 0;
+}
+
+.candidate-card small {
+  color: #60726c;
+  font-weight: 800;
+}
+
+.location-confirmation-panel > .secondary {
+  margin: 0 14px 14px;
+}
+
 .briefing-block {
   margin: 0 14px 14px;
 }
@@ -624,6 +704,10 @@ textarea {
   .map-panel {
     min-height: auto;
   }
+
+  .candidate-card dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 680px) {
@@ -653,5 +737,9 @@ textarea {
   .empty-map {
     min-height: 440px;
     height: 440px;
+  }
+
+  .candidate-card dl {
+    grid-template-columns: 1fr;
   }
 }

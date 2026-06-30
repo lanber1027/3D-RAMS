@@ -116,6 +116,16 @@ class RunCreateRequest(BaseModel):
     )
 
 
+class LocationConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    candidateId: str = Field(
+        min_length=1,
+        max_length=120,
+        description="Location candidate id selected by the user before review tools run.",
+    )
+
+
 class SessionResponse(BaseModel):
     sessionId: str
     testerAlias: str | None
