@@ -212,7 +212,7 @@ def extract_json_body(raw_body: str) -> dict[str, Any] | None:
     direct = _json_object(raw_body)
     if direct is not None:
         return direct
-    text = extract_text_body(raw_body)
+    text = _stream_text_body(raw_body)
     if not text:
         return None
     return _json_object(text)
@@ -223,6 +223,14 @@ def extract_text_body(raw_body: str) -> str:
     if direct is not None:
         return _text_from_json(direct)
 
+    text = _stream_text_body(raw_body)
+    parsed = _json_object(text) if text else None
+    if parsed is not None:
+        return _text_from_json(parsed)
+    return text
+
+
+def _stream_text_body(raw_body: str) -> str:
     chunks: list[str] = []
     for line in raw_body.splitlines():
         if not line.startswith("data: "):
