@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
 
 from .agent import run_site_briefing
@@ -11,6 +13,28 @@ def ping() -> dict[str, str]:
 
 
 def handle_invocation(payload: dict[str, Any] | None) -> dict[str, Any]:
+    payload = payload or {}
+    if _is_local_asione_payload(payload):
+        local_entry = _load_local_entry_flow()
+        local_response = local_entry.run_local_asione_chat(
+            payload,
+            supervisor_invoker=_handle_supervisor_invocation,
+        )
+        run = local_response.get("run") if isinstance(local_response, dict) else None
+        delivery = local_response.get("delivery") if isinstance(local_response, dict) else None
+        return {
+            "output": {
+                "localAsiOne": local_response,
+                "delivery": delivery,
+                "run": run,
+                "reportStatus": delivery.get("status") if isinstance(delivery, dict) else "entry_pending",
+                "workflowMode": delivery.get("workflowMode") if isinstance(delivery, dict) else "entry_intake",
+            }
+        }
+    return _handle_supervisor_invocation(payload)
+
+
+def _handle_supervisor_invocation(payload: dict[str, Any] | None) -> dict[str, Any]:
     payload = payload or {}
     request = _extract_request(payload)
     run = run_site_briefing(request)
@@ -25,6 +49,22 @@ def handle_invocation(payload: dict[str, Any] | None) -> dict[str, Any]:
             "run": run,
         }
     }
+
+
+def _is_local_asione_payload(payload: dict[str, Any]) -> bool:
+    return bool(payload.get("localAsiOne") or payload.get("localAsiOneChat") or payload.get("entryMessage"))
+
+
+def _load_local_entry_flow():
+    entry_root = Path(__file__).resolve().parents[2] / "asi_one_entry_agent"
+    tools_root = Path(__file__).resolve().parents[2] / "rams_agent_tools"
+    for path in (entry_root, tools_root):
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+
+    import local_entry_flow
+
+    return local_entry_flow
 
 
 def _extract_request(payload: dict[str, Any]) -> dict[str, Any]:

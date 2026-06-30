@@ -15,11 +15,13 @@ It is separate from `app/rams_supervisor_runtime`, which remains the 3D-RAMS sup
 
 ## Local Development
 
-This runtime requires AWS/Bedrock access for meaningful model responses. It is not part of the no-AWS Demo1 path.
+The deployed/runtime entry agent uses AWS/Bedrock and Strands for meaningful model responses:
 
 ```bash
 agentcore dev --runtime asi_one_entry_agent --skip-deploy --no-browser --no-traces --logs --port 8082
 ```
+
+For the no-AWS Demo1 path, `local_entry_flow.py` provides a deterministic local ASI:ONE substitute. The frontend sends a `localAsiOne` envelope to the local supervisor runtime, which routes through the entry adapter contract before invoking the supervisor directly. This keeps the local demo runnable without Bedrock, AgentVerse keys, or a second AgentCore runtime process.
 
 Optional Exa MCP tooling is disabled by default. Enable it only when live outbound network use is intended:
 

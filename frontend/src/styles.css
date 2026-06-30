@@ -20,7 +20,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -147,11 +148,15 @@ h4 {
 }
 
 .control-strip {
-  display: grid;
-  grid-template-columns: minmax(180px, 250px) repeat(2, minmax(120px, 180px)) repeat(3, minmax(112px, max-content)) repeat(3, max-content);
+  display: flex;
+  flex-wrap: wrap;
   align-items: end;
   gap: 10px;
   margin: 10px 0 16px;
+}
+
+.control-strip label:first-child {
+  min-width: 220px;
 }
 
 label {
@@ -163,13 +168,123 @@ label {
 }
 
 input,
-select {
+select,
+textarea {
   min-height: 40px;
   border: 1px solid #c9d2ce;
   border-radius: 6px;
   background: #ffffff;
   color: #17201c;
   padding: 0 10px;
+}
+
+textarea {
+  min-height: 82px;
+  padding: 10px;
+  resize: vertical;
+}
+
+.agent-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  justify-items: end;
+  align-items: start;
+  padding: 82px 18px 18px;
+  background: rgba(23, 32, 28, 0.2);
+}
+
+.agent-modal {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 100px);
+  overflow: hidden;
+  border: 1px solid #c9d5d0;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 42px rgba(23, 32, 28, 0.18);
+  padding: 0;
+}
+
+.agent-chat {
+  min-height: min(720px, calc(100vh - 100px));
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+}
+
+.agent-chat-heading {
+  padding: 12px 14px;
+  border-bottom: 1px solid #edf2ef;
+}
+
+.agent-chat-heading .icon-button {
+  margin-left: auto;
+}
+
+.message-list {
+  min-height: 280px;
+  max-height: calc(100vh - 330px);
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 14px;
+}
+
+.message {
+  max-width: 92%;
+  border: 1px solid #dbe4df;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fbfcfb;
+}
+
+.message.user {
+  justify-self: end;
+  border-color: #b7d9d1;
+  background: #eefaf6;
+}
+
+.message span {
+  display: block;
+  margin-bottom: 4px;
+  color: #4b615a;
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.message p {
+  margin-bottom: 0;
+}
+
+.message ul {
+  margin-bottom: 0;
+  padding-left: 18px;
+}
+
+.upload-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid #edf2ef;
+  padding: 10px 14px;
+  color: #5c6d67;
+  font-size: 0.86rem;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 10px;
+  border-top: 1px solid #edf2ef;
+  padding: 14px;
+}
+
+.composer textarea {
+  min-height: 112px;
+  resize: vertical;
 }
 
 .checkbox-label {
@@ -625,6 +740,22 @@ select {
 
   .status-stack {
     justify-content: flex-start;
+  }
+
+  .agent-modal-backdrop {
+    justify-items: stretch;
+    padding: 72px 12px 12px;
+  }
+
+  .upload-strip,
+  .composer {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .message {
+    max-width: 100%;
   }
 
   .scene-panel,

@@ -80,6 +80,57 @@ class AgentCoreInvocationTests(unittest.TestCase):
         self.assertEqual(result["scene"]["provider"], "cesium-local-cached-fixture")
         self.assertTrue(result["evidence"])
 
+    def test_local_asione_envelope_routes_through_entry_and_supervisor(self):
+        response = invoke_local(
+            {
+                "localAsiOne": True,
+                "sessionId": "local-demo-session",
+                "conversationId": "local-demo-session",
+                "message": (
+                    "Please prepare a pre-visit site review near 8 Albert Embankment, Lambeth "
+                    "within an 800 metre area for flood context, access, and public interface constraints."
+                ),
+                "confirmedByUser": True,
+                "runtimeOptions": {
+                    "fixturePack": "public-lambeth-thames",
+                    "useBedrock": False,
+                    "includePlanningFixture": True,
+                    "simulateMapFailure": False,
+                },
+            }
+        )
+
+        output = response["output"]
+        entry = output["localAsiOne"]
+        run = output["run"]
+        self.assertFalse(entry["needsClarification"])
+        self.assertFalse(entry["needsConfirmation"])
+        self.assertEqual(output["reportStatus"], "review_required")
+        self.assertEqual(entry["delivery"]["workflowMode"], "cached_public_fixture")
+        self.assertEqual(run["runtime"]["localAsiOneSubstitute"], True)
+        self.assertEqual(run["runtime"]["entryAgentMode"], "deterministic-local")
+        trace_names = [step["name"] for step in run["trace"]]
+        self.assertLess(trace_names.index("entry_agent_supervisor_handoff"), trace_names.index("plan_subagent_workflow"))
+        self.assertEqual(trace_names[-1], "entry_agent_delivery_summary")
+
+    def test_local_asione_envelope_clarifies_before_supervisor(self):
+        response = invoke_local(
+            {
+                "localAsiOne": True,
+                "sessionId": "local-demo-session",
+                "message": "Can you help me?",
+                "confirmedByUser": True,
+                "runtimeOptions": {"useBedrock": False},
+            }
+        )
+
+        output = response["output"]
+        entry = output["localAsiOne"]
+        self.assertEqual(output["reportStatus"], "entry_pending")
+        self.assertTrue(entry["needsClarification"])
+        self.assertIsNone(output["run"])
+        self.assertEqual(entry["runtime"]["supervisorRuntime"], "not-invoked")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, GitBranch, Play, RotateCcw, ShieldCheck } from "lucide-react";
+import { Bot, FileUp, GitBranch, MessageSquare, Play, RotateCcw, Send, ShieldCheck, X } from "lucide-react";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 
 const AGENTCORE_URL = import.meta.env.VITE_AGENTCORE_URL || "/agentcore/invocations";
+const LOCAL_ASIONE_URL = import.meta.env.VITE_LOCAL_ASIONE_URL || AGENTCORE_URL;
+
+const DEFAULT_MESSAGE =
+  "Please prepare a pre-visit site review near 8 Albert Embankment, Lambeth within an 800 metre area for flood context, access, and public interface constraints.";
 
 const DEFAULT_REQUEST = {
   siteName: "8 Albert Embankment and land to the rear",
@@ -286,6 +290,17 @@ function WorkflowVisualizer({ architecture }) {
 
 function App() {
   const [request, setRequest] = useState(DEFAULT_REQUEST);
+  const [entryMessage, setEntryMessage] = useState(DEFAULT_MESSAGE);
+  const [entryResponse, setEntryResponse] = useState(null);
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [agentMessages, setAgentMessages] = useState([
+    {
+      id: "welcome",
+      role: "assistant",
+      text: "Tell me where you are going and what kind of site visit you are planning. I will ask for missing critical details, run tools, and return a RAMS-style review pack for human review.",
+    },
+  ]);
+  const [uploads, setUploads] = useState([]);
   const [run, setRun] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -302,19 +317,63 @@ function App() {
     return "pending";
   }, [run]);
 
-  async function runAgent(nextRequest = request) {
+  async function runAgent(nextRequest = request, nextMessage = entryMessage, confirmedByUser = true, appendMessage = true) {
+    const submittedText = nextMessage.trim();
+    if (appendMessage && submittedText) {
+      setAgentMessages((current) => [
+        ...current,
+        {
+          id: `user-${Date.now()}`,
+          role: "user",
+          text: submittedText,
+        },
+      ]);
+      setEntryMessage("");
+    }
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(AGENTCORE_URL, {
+      const response = await fetch(LOCAL_ASIONE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: nextRequest }),
+        body: JSON.stringify({
+          localAsiOne: true,
+          sessionId: "local-demo-session",
+          conversationId: "local-demo-session",
+          message: nextMessage,
+          confirmedByUser,
+          runtimeOptions: {
+            ...nextRequest,
+            materials: uploads.map((upload) => ({
+              type: upload.type,
+              label: upload.label,
+              summary: upload.summary,
+            })),
+          },
+        }),
       });
       if (!response.ok) throw new Error(`API returned ${response.status}`);
       const payload = await response.json();
-      const nextRun = payload.output?.run;
-      if (!nextRun) throw new Error("AgentCore response did not include output.run");
+      const nextEntryResponse = payload.output?.localAsiOne || null;
+      setEntryResponse(nextEntryResponse);
+      if (nextEntryResponse) {
+        setAgentMessages((current) => [
+          ...current,
+          {
+            id: nextEntryResponse.runId || `assistant-${Date.now()}`,
+            role: "assistant",
+            text: nextEntryResponse.assistantMessage,
+            questions: nextEntryResponse.clarifyingQuestions || [],
+          },
+        ]);
+      }
+      if (nextEntryResponse?.needsClarification || nextEntryResponse?.needsConfirmation) {
+        setAgentOpen(true);
+        setRun(null);
+        return;
+      }
+      const nextRun = nextEntryResponse?.run || payload.output?.run;
+      if (!nextRun) throw new Error("Local ASI:ONE response did not include a supervisor run");
       setRun(nextRun);
     } catch (err) {
       setError(err.message);
@@ -324,8 +383,26 @@ function App() {
   }
 
   useEffect(() => {
-    runAgent(DEFAULT_REQUEST);
+    runAgent(DEFAULT_REQUEST, DEFAULT_MESSAGE, true, false);
   }, []);
+
+  function sendFieldBriefMessage(event) {
+    event.preventDefault();
+    if (!entryMessage.trim() || loading) return;
+    runAgent(request, entryMessage, true, true);
+  }
+
+  function registerMockUpload() {
+    setUploads((current) => [
+      ...current,
+      {
+        id: `local-upload-${current.length + 1}`,
+        type: "application/pdf",
+        label: `Test evidence ${current.length + 1}`,
+        summary: "Local demo evidence metadata registered by the FieldBrief Agent.",
+      },
+    ]);
+  }
 
   function updateRequest(field, value) {
     setRequest((current) => ({ ...current, [field]: value }));
@@ -336,9 +413,13 @@ function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">3D-RAMS Demo1</p>
-          <h1>Pre-Visit Field Briefing Agent</h1>
+          <h1>Supervisor Runtime + Site Visualization</h1>
         </div>
         <div className="status-stack">
+          <button className="secondary" onClick={() => setAgentOpen(true)}>
+            <MessageSquare size={16} />
+            FieldBrief Agent
+          </button>
           <div className={`safety-pill ${safetyTone}`}>
             <ShieldCheck size={16} />
             {run ? run.safety.level : "not run"}
@@ -349,6 +430,55 @@ function App() {
           </div>
         </div>
       </header>
+
+      {agentOpen && (
+        <div className="agent-modal-backdrop" role="presentation">
+          <section className="agent-modal agent-chat panel" role="dialog" aria-modal="true" aria-labelledby="fieldbrief-title">
+            <div className="panel-heading agent-chat-heading">
+              <Bot size={18} />
+              <h2 id="fieldbrief-title">FieldBrief Agent</h2>
+              <button className="icon-button" aria-label="Collapse FieldBrief Agent" onClick={() => setAgentOpen(false)}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="message-list">
+              {agentMessages.map((message) => (
+                <article className={`message ${message.role}`} key={message.id}>
+                  <span>{message.role === "user" ? "You" : "3D-RAMS Agent"}</span>
+                  <p>{message.text}</p>
+                  {message.questions?.length > 0 && (
+                    <ul>
+                      {message.questions.map((question) => (
+                        <li key={question}>{question}</li>
+                      ))}
+                    </ul>
+                  )}
+                </article>
+              ))}
+              {entryResponse?.needsConfirmation && entryResponse?.confirmation?.summary && (
+                <article className="message assistant">
+                  <span>3D-RAMS Agent</span>
+                  <p>{entryResponse.confirmation.summary}</p>
+                </article>
+              )}
+            </div>
+            <div className="upload-strip">
+              <button className="secondary" type="button" onClick={registerMockUpload}>
+                <FileUp size={16} />
+                Register test PDF/image
+              </button>
+              <span>{uploads.length ? `${uploads.length} evidence file(s) registered` : "Uploads use S3 when hosted; local mode registers metadata only."}</span>
+            </div>
+            <form className="composer" onSubmit={sendFieldBriefMessage}>
+              <textarea value={entryMessage} onChange={(event) => setEntryMessage(event.target.value)} />
+              <button disabled={loading || !entryMessage.trim()}>
+                <Send size={16} />
+                {loading ? "Running" : "Send"}
+              </button>
+            </form>
+          </section>
+        </div>
+      )}
 
       <section className="control-strip">
         <label>
@@ -401,30 +531,35 @@ function App() {
           />
           Bedrock
         </label>
-        <button onClick={() => runAgent()} disabled={loading}>
-          <Play size={16} />
-          {loading ? "Running" : "Run"}
+        <button onClick={() => setAgentOpen(true)}>
+          <MessageSquare size={16} />
+          Open FieldBrief
         </button>
         <button
           className="secondary"
           onClick={() => {
-            const unsafe = {
-              ...request,
-              additionalRequest: "Please certify RAMS and approve work today.",
-            };
-            setRequest(unsafe);
-            runAgent(unsafe);
+            setAgentOpen(true);
+            runAgent();
           }}
         >
-          <AlertTriangle size={16} />
-          Safety test
+          <Play size={16} />
+          {loading ? "Running" : "Run latest intake"}
         </button>
         <button
           className="icon-button"
           aria-label="Reset request"
           onClick={() => {
             setRequest(DEFAULT_REQUEST);
-            runAgent(DEFAULT_REQUEST);
+            setEntryMessage(DEFAULT_MESSAGE);
+            setAgentMessages([
+              {
+                id: "welcome",
+                role: "assistant",
+                text: "Tell me where you are going and what kind of site visit you are planning. I will ask for missing critical details, run tools, and return a RAMS-style review pack for human review.",
+              },
+            ]);
+            setUploads([]);
+            runAgent(DEFAULT_REQUEST, DEFAULT_MESSAGE, true, false);
           }}
         >
           <RotateCcw size={16} />
