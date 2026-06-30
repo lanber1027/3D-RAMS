@@ -16,7 +16,9 @@ import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 
 const AGENTCORE_URL = import.meta.env.VITE_AGENTCORE_URL || "/agentcore/invocations";
-const LOCAL_ASIONE_URL = import.meta.env.VITE_LOCAL_ASIONE_URL || AGENTCORE_URL;
+const CLOUD_ENTRY_PROXY_URL = import.meta.env.VITE_CLOUD_ENTRY_PROXY_URL || "";
+const USE_LOCAL_ASIONE = import.meta.env.VITE_USE_LOCAL_ASIONE === "true";
+const ENTRY_AGENT_URL = USE_LOCAL_ASIONE ? import.meta.env.VITE_LOCAL_ASIONE_URL || AGENTCORE_URL : CLOUD_ENTRY_PROXY_URL;
 const STARTER_PROMPT =
   "I want to visit 8 Albert Embankment tomorrow for a survey. Please prepare a pre-visit RAMS-style review pack.";
 
@@ -47,6 +49,65 @@ function runToUiState(run) {
     briefing: run.briefing,
     safety: run.safety,
     trace: run.trace,
+  };
+}
+
+function extractAreaScope(text) {
+  const km = text.match(/(\d+(?:\.\d+)?)\s*km\b/i);
+  if (km) return { type: "radius", meters: Math.round(Number(km[1]) * 1000) };
+  const metres = text.match(/(\d+(?:\.\d+)?)\s*(m|metre|meter|metres|meters)\b/i);
+  if (metres) return { type: "radius", meters: Math.round(Number(metres[1])) };
+  return { type: "radius", meters: 800 };
+}
+
+function buildCloudEntryPayload({ submittedText, request, uploads }) {
+  return {
+    frontendInvoke: true,
+    conversationId: "frontend-demo-session",
+    entryAgentId: "fieldbrief-demo-ui",
+    confirmedByUser: true,
+    message: submittedText,
+    intake: {
+      locationText: request.siteName || submittedText,
+      locationCandidate: {
+        label: request.siteName || "User supplied site",
+        lat: request.latitude,
+        lng: request.longitude,
+        confidence: 0.72,
+      },
+      areaScope: extractAreaScope(submittedText),
+      userGoal: request.goal || "Pre-visit RAMS-style review pack",
+      userNotes: submittedText,
+      materials: uploads.map((upload) => ({
+        type: upload.type,
+        label: upload.label,
+        summary: upload.summary,
+      })),
+    },
+    runtimeOptions: {
+      fixturePack: request.fixturePack,
+      useBedrock: request.useBedrock,
+      includePlanningFixture: request.includePlanningFixture,
+      simulateMapFailure: request.simulateMapFailure,
+    },
+  };
+}
+
+function buildLocalAsiOnePayload({ submittedText, request, uploads }) {
+  return {
+    localAsiOne: true,
+    sessionId: "local-demo-session",
+    conversationId: "local-demo-session",
+    message: submittedText,
+    confirmedByUser: true,
+    runtimeOptions: {
+      ...request,
+      materials: uploads.map((upload) => ({
+        type: upload.type,
+        label: upload.label,
+        summary: upload.summary,
+      })),
+    },
   };
 }
 
@@ -271,28 +332,20 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(LOCAL_ASIONE_URL, {
+      if (!ENTRY_AGENT_URL) {
+        throw new Error("Cloud entry proxy is not configured. Set VITE_CLOUD_ENTRY_PROXY_URL, or set VITE_USE_LOCAL_ASIONE=true for explicit local testing.");
+      }
+      const requestPayload = USE_LOCAL_ASIONE
+        ? buildLocalAsiOnePayload({ submittedText, request, uploads })
+        : buildCloudEntryPayload({ submittedText, request, uploads });
+      const response = await fetch(ENTRY_AGENT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          localAsiOne: true,
-          sessionId: "local-demo-session",
-          conversationId: "local-demo-session",
-          message: submittedText,
-          confirmedByUser: true,
-          runtimeOptions: {
-            ...request,
-            materials: uploads.map((upload) => ({
-              type: upload.type,
-              label: upload.label,
-              summary: upload.summary,
-            })),
-          },
-        }),
+        body: JSON.stringify(requestPayload),
       });
       if (!response.ok) throw new Error(`Agent run failed (${response.status})`);
       const payload = await response.json();
-      const nextEntryResponse = payload.output?.localAsiOne || null;
+      const nextEntryResponse = payload.output?.localAsiOne || payload.output?.entryAgent || null;
       setEntryResponse(nextEntryResponse);
       if (nextEntryResponse) {
         setMessages((current) => [
@@ -300,7 +353,7 @@ function App() {
           {
             id: nextEntryResponse.runId || `assistant-${Date.now()}`,
             role: "assistant",
-            text: nextEntryResponse.assistantMessage,
+            text: nextEntryResponse.assistantMessage || payload.output?.delivery?.customerSummary?.headline || "Supervisor workflow completed.",
             questions: nextEntryResponse.clarifyingQuestions || [],
           },
         ]);
@@ -311,7 +364,7 @@ function App() {
         return;
       }
       const nextRun = nextEntryResponse?.run || payload.output?.run;
-      if (!nextRun) throw new Error("Local ASI:ONE response did not include a supervisor run");
+      if (!nextRun) throw new Error("Entry agent response did not include a supervisor run");
       setRun(nextRun);
     } catch (err) {
       setError(err.message);
@@ -359,7 +412,7 @@ function App() {
     <main className="app-shell product-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">3D-RAMS Local Agent</p>
+          <p className="eyebrow">3D-RAMS AgentCore Workflow</p>
           <h1>Pre-Visit FieldBrief Agent</h1>
           <p className="topbar-summary">
             Ask for a site visit review pack in normal language. The agent runs supervisor tools and returns map, evidence, trace, and safety output.
@@ -379,7 +432,7 @@ function App() {
           </div>
           <div className="safety-pill pending">
             <Cloud size={16} />
-            {runtime.sessionTraceMode || runtime.supervisorRuntime || "local"}
+            {runtime.subagentExecutionMode || runtime.supervisorRuntime || (USE_LOCAL_ASIONE ? "local" : "cloud")}
           </div>
         </div>
       </header>
@@ -414,7 +467,7 @@ function App() {
                 <FileUp size={16} />
                 Register test PDF/image
               </button>
-              <span>{uploads.length ? `${uploads.length} evidence file(s) registered` : "Uploads use S3 when hosted; local mode registers metadata only."}</span>
+              <span>{uploads.length ? `${uploads.length} evidence file(s) registered` : "Uploads use S3 when hosted; local testing registers metadata only."}</span>
             </div>
             <form className="composer" onSubmit={sendMessage}>
               <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />

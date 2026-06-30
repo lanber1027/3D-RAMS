@@ -9,9 +9,20 @@ It is separate from `app/rams_supervisor_runtime`, which remains the 3D-RAMS sup
 ## Runtime Role
 
 - Accept chat-style prompts or Bedrock-style message payloads from the AgentVerse hosted adapter.
+- Accept structured frontend/proxy payloads with confirmed intake and launch the supervisor runtime.
 - Use a fast Bedrock model through Strands for entry-agent conversation.
 - Preserve AgentCore session/user identity so memory can be used when configured.
 - Stay thin: intake and delivery UX live here, while deeper site-review orchestration belongs in `rams_supervisor_runtime`.
+
+## Cloud Supervisor Handoff
+
+Set the supervisor runtime ARN in the deployed entry runtime environment:
+
+```bash
+RAMS_SUPERVISOR_RUNTIME_ARN=arn:aws:bedrock-agentcore:<region>:<account-id>:runtime/<runtime-id>
+```
+
+The entry runtime maps confirmed intake with `supervisor_adapter.py`, invokes the supervisor runtime, and returns the supervisor run plus entry delivery payload. Do not commit the real ARN.
 
 ## Local Development
 
@@ -21,7 +32,7 @@ The deployed/runtime entry agent uses AWS/Bedrock and Strands for meaningful mod
 agentcore dev --runtime asi_one_entry_agent --skip-deploy --no-browser --no-traces --logs --port 8082
 ```
 
-For the no-AWS Demo1 path, `local_entry_flow.py` provides a deterministic local ASI:ONE substitute. The frontend sends a `localAsiOne` envelope to the local supervisor runtime, which routes through the entry adapter contract before invoking the supervisor directly. This keeps the local demo runnable without Bedrock, AgentVerse keys, or a second AgentCore runtime process.
+For explicit no-AWS local testing, `local_entry_flow.py` still provides a deterministic local ASI:ONE substitute. It is no longer the default frontend path; set `VITE_USE_LOCAL_ASIONE=true` only when local testing is intended.
 
 Optional Exa MCP tooling is disabled by default. Enable it only when live outbound network use is intended:
 

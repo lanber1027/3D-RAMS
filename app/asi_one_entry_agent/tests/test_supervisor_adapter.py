@@ -11,11 +11,12 @@ TOOLS_ROOT = ENTRY_APP_ROOT.parent / "rams_agent_tools"
 for app_root in (ENTRY_APP_ROOT, SUPERVISOR_APP_ROOT, TOOLS_ROOT):
     if str(app_root) in sys.path:
         sys.path.remove(str(app_root))
-for app_root in (ENTRY_APP_ROOT, SUPERVISOR_APP_ROOT, TOOLS_ROOT):
+for app_root in (TOOLS_ROOT, SUPERVISOR_APP_ROOT, ENTRY_APP_ROOT):
     if str(app_root) not in sys.path:
         sys.path.insert(0, str(app_root))
 
-from main import invoke_local  # noqa: E402
+from main import handle_invocation, invoke_local  # noqa: E402
+from supervisor_core.agentcore_adapter import handle_invocation as invoke_supervisor_local  # noqa: E402
 from supervisor_adapter import (  # noqa: E402
     AdapterValidationError,
     build_agentcore_invocation,
@@ -103,6 +104,33 @@ class AgentVerseAdapterTests(unittest.TestCase):
         self.assertTrue(delivery["deepReport"]["visualizationReady"])
         self.assertGreaterEqual(delivery["deepReport"]["evidenceCount"], 1)
         self.assertGreaterEqual(delivery["deepReport"]["traceCount"], 9)
+
+    def test_entry_cloud_handoff_invokes_supervisor_runtime(self):
+        calls: list[dict] = []
+
+        def fake_invoke_runtime(**kwargs):
+            calls.append(kwargs)
+            return invoke_supervisor_local(kwargs["payload"])
+
+        response = handle_invocation(
+            confirmed_entry_payload(),
+            supervisor_runtime_arn="arn:aws:bedrock-agentcore:eu-west-2:123456789012:runtime/supervisor-test",
+            invoke_runtime=fake_invoke_runtime,
+        )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["runtime_arn"], "arn:aws:bedrock-agentcore:eu-west-2:123456789012:runtime/supervisor-test")
+        self.assertEqual(calls[0]["payload"]["input"]["upstream"]["source"], "AGENTVERSE")
+        output = response["output"]
+        self.assertEqual(output["reportStatus"], "review_required")
+        self.assertEqual(output["workflowMode"], "cached_public_fixture")
+        self.assertEqual(output["entryAgent"]["mode"], "cloud-supervisor-handoff")
+        self.assertTrue(output["structuredReport"]["visualization"]["annotations"])
+        self.assertIsNone(output["run"]["runtime"].get("localAsiOneSubstitute"))
+
+    def test_entry_cloud_handoff_requires_supervisor_runtime_arn(self):
+        with self.assertRaisesRegex(AdapterValidationError, "RAMS_SUPERVISOR_RUNTIME_ARN"):
+            handle_invocation(confirmed_entry_payload(), supervisor_runtime_arn="", invoke_runtime=lambda **_: {})
 
 
 if __name__ == "__main__":

@@ -79,6 +79,7 @@ echo "Starting frontend on http://0.0.0.0:$FRONTEND_PORT"
   cd frontend
   VITE_AGENTCORE_URL=/agentcore/invocations \
     VITE_AGENTCORE_PROXY_TARGET="http://127.0.0.1:$AGENTCORE_PORT" \
+    VITE_USE_LOCAL_ASIONE=true \
     npm run dev -- --host 0.0.0.0 --port "$FRONTEND_PORT"
 ) &
 FRONTEND_PID=$!

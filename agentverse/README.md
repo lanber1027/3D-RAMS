@@ -57,6 +57,27 @@ uagents-core
 AgentVerse hosted agents may not allow arbitrary dependencies. This adapter intentionally uses
 `requests` plus standard-library SigV4 signing instead of `boto3`.
 
+## Frontend Signed Proxy
+
+For browser-based demos, do not call AgentCore directly from the frontend with AWS credentials.
+Run the thin local/proxy adapter instead and point the UI at it:
+
+```bash
+export AWS_REGION=eu-west-2
+export AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:<region>:<account-id>:runtime/<asi-one-entry-runtime-id>
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+python agentverse/frontend_proxy.py
+```
+
+Then start the frontend with:
+
+```bash
+VITE_CLOUD_ENTRY_PROXY_URL=http://127.0.0.1:8787/invoke npm run dev
+```
+
+Use `VITE_USE_LOCAL_ASIONE=true` only for explicit no-AWS local testing.
+
 ## Hosted Agent Entry File
 
 Avoid registering the chat protocol twice. In AgentVerse, either put the full contents of

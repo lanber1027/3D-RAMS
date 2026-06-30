@@ -1,17 +1,33 @@
 from __future__ import annotations
 
+import json
+import os
 from typing import Any
 
-from bedrock_agentcore.runtime import BedrockAgentCoreApp
-from model.load import load_model
-from mcp_client.client import get_streamable_http_mcp_client
-from memory.session import get_memory_session_manager
-from strands import Agent, tool
-from strands.agent.conversation_manager.null_conversation_manager import NullConversationManager
+from agentcore_client import invoke_runtime_json
+from supervisor_adapter import AdapterValidationError, build_agentcore_invocation, build_delivery_payload
+
+try:
+    from bedrock_agentcore.runtime import BedrockAgentCoreApp
+    from model.load import load_model
+    from mcp_client.client import get_streamable_http_mcp_client
+    from memory.session import get_memory_session_manager
+    from strands import Agent, tool
+    from strands.agent.conversation_manager.null_conversation_manager import NullConversationManager
+except ImportError:
+    BedrockAgentCoreApp = None
+    Agent = None
+
+    def tool(func):
+        return func
 
 
-app = BedrockAgentCoreApp()
-log = app.logger
+if BedrockAgentCoreApp is not None:
+    app = BedrockAgentCoreApp()
+    log = app.logger
+else:
+    app = None
+    log = None
 
 DEFAULT_SYSTEM_PROMPT = """
 You are the 3D-RAMS AgentVerse entry agent.
@@ -39,11 +55,13 @@ def add_numbers(a: int, b: int) -> int:
     return a + b
 
 
-tools.append(add_numbers)
+if Agent is not None:
+    tools.append(add_numbers)
 
-entry_mcp_client = get_streamable_http_mcp_client()
-if entry_mcp_client:
-    tools.append(entry_mcp_client)
+if Agent is not None:
+    entry_mcp_client = get_streamable_http_mcp_client()
+    if entry_mcp_client:
+        tools.append(entry_mcp_client)
 
 
 def _make_conversation_manager() -> NullConversationManager:
@@ -73,6 +91,74 @@ def agent_factory():
 get_or_create_agent = agent_factory()
 
 
+def handle_invocation(
+    payload: dict[str, Any] | None,
+    *,
+    supervisor_runtime_arn: str | None = None,
+    invoke_runtime=invoke_runtime_json,
+) -> dict[str, Any]:
+    payload = payload or {}
+    if not _is_structured_frontend_payload(payload):
+        raise AdapterValidationError("Structured entry payload must include frontendInvoke or intake.")
+
+    runtime_arn = supervisor_runtime_arn or os.getenv("RAMS_SUPERVISOR_RUNTIME_ARN")
+    if not runtime_arn:
+        raise AdapterValidationError("RAMS_SUPERVISOR_RUNTIME_ARN is required for cloud supervisor handoff.")
+
+    invocation = build_agentcore_invocation(payload)
+    conversation_id = str(payload.get("conversationId") or payload.get("sessionId") or "3d-rams-entry-session")
+    user_id = str(payload.get("userId") or "3d-rams-entry-agent")
+    agentcore_response = invoke_runtime(
+        runtime_arn=runtime_arn,
+        payload=invocation,
+        session_id=conversation_id,
+        user_id=user_id,
+    )
+    delivery = build_delivery_payload(agentcore_response, entry_payload=payload)
+    output = agentcore_response.get("output") if isinstance(agentcore_response.get("output"), dict) else {}
+    return {
+        "output": {
+            "delivery": delivery,
+            "run": output.get("run"),
+            "structuredReport": output.get("structuredReport"),
+            "reportStatus": output.get("reportStatus") or delivery.get("status"),
+            "workflowMode": output.get("workflowMode") or delivery.get("workflowMode"),
+            "entryAgent": {
+                "mode": "cloud-supervisor-handoff",
+                "adapterVersion": "asi-one-entry-agent-v1",
+                "conversationId": conversation_id,
+            },
+        }
+    }
+
+
+def invoke_local(
+    payload: dict[str, Any] | None = None,
+    *,
+    supervisor_invoker=None,
+) -> dict[str, Any]:
+    if payload and not _is_structured_frontend_payload(payload) and "input" in payload:
+        from supervisor_core.agentcore_adapter import handle_invocation as supervisor_handle_invocation
+
+        return supervisor_handle_invocation(payload)
+
+    if supervisor_invoker is None:
+        from supervisor_core.agentcore_adapter import handle_invocation as supervisor_invoker
+
+        def local_invoke_runtime(**kwargs):
+            return supervisor_invoker(kwargs["payload"])
+
+    else:
+        def local_invoke_runtime(**kwargs):
+            return supervisor_invoker(kwargs["payload"])
+
+    return handle_invocation(
+        payload,
+        supervisor_runtime_arn="local-test-supervisor-runtime",
+        invoke_runtime=local_invoke_runtime,
+    )
+
+
 def _extract_prompt(payload: dict[str, Any]):
     """Accept harness-style messages[], tool_results[], or plain prompt string payloads."""
     if "messages" in payload:
@@ -96,23 +182,40 @@ def _extract_prompt(payload: dict[str, Any]):
     return payload.get("prompt", "")
 
 
-@app.entrypoint
-async def invoke(payload: dict[str, Any], context: Any):
-    log.info("Invoking 3D-RAMS AgentVerse entry runtime.")
+if app is not None:
 
-    session_id = getattr(context, "session_id", "default-session")
-    user_id = getattr(context, "user_id", "default-user")
-    agent = get_or_create_agent(session_id, user_id)
-    prompt = _extract_prompt(payload)
+    @app.entrypoint
+    async def invoke(payload: dict[str, Any], context: Any):
+        log.info("Invoking 3D-RAMS AgentVerse entry runtime.")
 
-    async for event in agent.stream_async(prompt):
-        if not isinstance(event, dict) or "event" not in event:
-            continue
-        content_block_start = event["event"].get("contentBlockStart")
-        if content_block_start is not None and not content_block_start.get("start"):
-            continue
-        yield event
+        if _is_structured_frontend_payload(payload):
+            result = handle_invocation(payload)
+            yield _text_delta_event(json.dumps(result))
+            return
+
+        session_id = getattr(context, "session_id", "default-session")
+        user_id = getattr(context, "user_id", "default-user")
+        agent = get_or_create_agent(session_id, user_id)
+        prompt = _extract_prompt(payload)
+
+        async for event in agent.stream_async(prompt):
+            if not isinstance(event, dict) or "event" not in event:
+                continue
+            content_block_start = event["event"].get("contentBlockStart")
+            if content_block_start is not None and not content_block_start.get("start"):
+                continue
+            yield event
+
+
+def _is_structured_frontend_payload(payload: dict[str, Any]) -> bool:
+    return bool(payload.get("frontendInvoke") or payload.get("intake"))
+
+
+def _text_delta_event(text: str) -> dict[str, Any]:
+    return {"event": {"contentBlockDelta": {"delta": {"text": text}}}}
 
 
 if __name__ == "__main__":
+    if app is None:
+        raise RuntimeError("bedrock-agentcore and Strands dependencies are required to run the entry runtime server.")
     app.run()
