@@ -101,13 +101,13 @@ def validate_intake_result(result: dict[str, Any], turn: dict[str, Any]) -> dict
     response["intake"] = intake
 
     if status == "confirmation_required":
-        response["confirmation"] = response["confirmation"] or {"summary": _confirmation_summary(intake)}
+        response["confirmation"] = {"summary": _confirmation_summary(intake)}
         response["assistantMessage"] = _confirmation_message(intake)
         return response
 
     if turn["confirmedByUser"] is not True:
         response["status"] = "confirmation_required"
-        response["confirmation"] = response["confirmation"] or {"summary": _confirmation_summary(intake)}
+        response["confirmation"] = {"summary": _confirmation_summary(intake)}
         response["assistantMessage"] = _confirmation_message(intake)
         return response
 

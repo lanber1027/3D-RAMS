@@ -103,6 +103,7 @@ class IntakeCoordinatorTests(unittest.TestCase):
         self.assertEqual(result["status"], "confirmation_required")
         self.assertIn("48 Quernmore Road", result["assistantMessage"])
         self.assertIn("800m radius", result["assistantMessage"])
+        self.assertIn("48 Quernmore Road", result["confirmation"]["summary"])
 
     def test_invalid_model_json_uses_deterministic_fallback(self):
         result = coordinate_intake(
