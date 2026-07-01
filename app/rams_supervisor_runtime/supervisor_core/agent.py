@@ -189,7 +189,7 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
     briefing_data = harness_data(briefing_result)
     annotations = _dict_list(annotation_data.get("annotations"), "annotation_subagent", "annotations")
     briefing = _briefing_payload(briefing_data.get("briefing"))
-    _merge_material_briefing(briefing, material_result)
+    _merge_material_briefing(briefing, {**material_result, "findings": material_findings})
     evidence = _evidence_items(briefing_data.get("evidence")) + material_evidence
     bedrock_status = briefing_data["bedrockStatus"]
     bedrock_fallback_reason = briefing_data["bedrockFallbackReason"]
@@ -399,6 +399,10 @@ def _merge_material_briefing(briefing: dict[str, Any], material_result: dict[str
         briefing["summary"].append(
             f"{len(accepted)} authorized material reference(s) produced safe evidence summaries for human review."
         )
+        for finding in _dict_list(material_result.get("findings"), "material_ingestion", "findings")[:3]:
+            title = str(finding.get("title") or "").strip()
+            if title:
+                briefing["priority_checks"].append(f"Review material-derived observation: {title}.")
         briefing["limitations"].append(
             "Material-derived output uses ASI/ASI:ONE-authorized summaries or fixtures; raw private material content is not stored in the report."
         )

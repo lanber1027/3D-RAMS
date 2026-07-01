@@ -103,6 +103,9 @@ def ingest_material_references(
     """
     reference_items = [item for item in materials if isinstance(item, dict)] if isinstance(materials, list) else []
     safe_references = [_sanitize_reference(item, index) for index, item in enumerate(reference_items)]
+    if case_id:
+        for reference in safe_references:
+            reference.setdefault("caseId", case_id)
     current_time = now or datetime.now(timezone.utc)
     accepted: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -226,6 +229,7 @@ def ingest_material_references(
                 "mode": output["mode"],
                 "received": output["received"],
                 "accepted": output["accepted"],
+                "acceptedReferences": accepted,
                 "skippedCount": output["skippedCount"],
                 "skipped": skipped,
                 "citationCount": len(citations),
@@ -287,12 +291,14 @@ def _skip_reason(reference: dict[str, Any], *, case_id: str | None, now: datetim
     access = reference.get("access") if isinstance(reference.get("access"), dict) else {}
     access_status = str(access.get("status") or "").strip().lower()
     access_mode = str(access.get("mode") or "").strip().lower()
-    if access_status in {"denied", "expired", "revoked", "unauthorized"}:
-        return access_status
+    status_reason = _explicit_status_reason(access_status)
+    if status_reason:
+        return status_reason
     if access.get("authorized") is False:
         return "denied"
-    if access_mode in {"denied", "expired", "revoked", "unauthorized"}:
-        return access_mode
+    mode_reason = _explicit_status_reason(access_mode)
+    if mode_reason:
+        return mode_reason
     if access_mode not in AUTHORIZED_ACCESS_MODES:
         return "unsupported_access_mode"
 
@@ -358,7 +364,11 @@ def _extract_retrieved_material(
     if material_type not in {"application/pdf", "text/plain", "text/markdown"}:
         return None, "unsupported_format"
     if config is None or not config.bedrock_enabled:
-        return None, "model_not_configured" if _has_retrieval_hint(raw_reference, material_type) else "retrieval_not_configured"
+        if _has_retrieval_hint(raw_reference, material_type):
+            return None, "model_not_configured"
+        if material_type == "application/pdf":
+            return None, "extraction_failed"
+        return None, "retrieval_not_configured"
 
     payload, skip_reason = _retrieved_payload(raw_reference, material_type)
     if payload is None and skip_reason is None:
@@ -584,8 +594,28 @@ def _skipped_material(reference: dict[str, Any], reason: str) -> dict[str, Any]:
         "sourceSystem": reference.get("sourceSystem"),
         "type": reference.get("type"),
         "caseId": reference.get("caseId"),
+        "status": _status_for_reason(reason),
         "reason": reason,
     }
+
+
+def _explicit_status_reason(value: str) -> str | None:
+    normalized = value.replace("-", "_")
+    if normalized in {"denied", "expired", "revoked", "unauthorized", "skipped", "extraction_failed"}:
+        return normalized
+    if normalized == "unsupported":
+        return "unsupported"
+    return None
+
+
+def _status_for_reason(reason: str) -> str:
+    if reason in {"denied", "revoked", "unauthorized"}:
+        return "denied"
+    if reason in {"expired", "skipped", "extraction_failed", "unsupported"}:
+        return reason
+    if reason.startswith("unsupported"):
+        return "unsupported"
+    return "skipped"
 
 
 def _material_observation(item: dict[str, Any], index: int) -> dict[str, Any]:

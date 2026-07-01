@@ -370,31 +370,59 @@ def _evidence_summary(run: dict[str, Any], report: dict[str, Any]) -> list[dict[
 def _material_evidence_summary(run: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
     request = run.get("request") if isinstance(run.get("request"), dict) else {}
     intake = report.get("intake") if isinstance(report.get("intake"), dict) else {}
+    material_ingestion = run.get("materialIngestion") if isinstance(run.get("materialIngestion"), dict) else {}
+    accepted_by_id = {
+        _text(item.get("materialId")): item
+        for item in _dict_list(material_ingestion.get("acceptedReferences"))
+        if _text(item.get("materialId"))
+    }
+    skipped_by_id = {
+        _text(item.get("materialId")): item
+        for item in _dict_list(material_ingestion.get("skipped"))
+        if _text(item.get("materialId"))
+    }
     materials = request.get("materials") or intake.get("materials") or []
+    if not materials:
+        materials = _dict_list(material_ingestion.get("acceptedReferences")) + _dict_list(material_ingestion.get("skipped"))
     items = []
     for material in materials if isinstance(materials, list) else []:
         if not isinstance(material, dict):
             continue
+        material_id = _text(material.get("materialId")) or _text(material.get("id"))
+        accepted = accepted_by_id.get(material_id)
+        skipped = skipped_by_id.get(material_id)
         access = material.get("access") if isinstance(material.get("access"), dict) else {}
+        source_id = _text(material.get("sourceId"))
+        evidence_id = _text(material.get("evidenceId"))
+        if accepted:
+            source_id = source_id or _text(accepted.get("sourceId"))
+            evidence_id = evidence_id or _text(accepted.get("evidenceId"))
         items.append(
             {
-                "materialId": _text(material.get("materialId")) or _text(material.get("id")),
+                "materialId": material_id,
                 "sourceSystem": _text(material.get("sourceSystem")),
                 "type": _text(material.get("type")),
                 "label": _text(material.get("label")),
                 "summary": _text(material.get("summary")),
                 "caseId": _text(material.get("caseId")) or _text(request.get("caseId")) or _text(run.get("caseId")),
+                "status": _text(accepted.get("status")) if accepted else _text(skipped.get("status")) if skipped else _text(access.get("status")),
+                "reason": _text(skipped.get("reason")) if skipped else None,
+                "retrievalMode": _text(accepted.get("retrievalMode")) if accepted else None,
                 "access": {
                     "mode": _text(access.get("mode")) or "reference_only",
                     "expiresAt": _text(access.get("expiresAt")),
                     "status": _text(access.get("status")) or "not_retrieved",
                 },
-                "sourceIds": _string_list(material.get("sourceIds")),
-                "evidenceIds": _string_list(material.get("evidenceIds")),
+                "sourceIds": _string_list(material.get("sourceIds")) or ([source_id] if source_id else []),
+                "evidenceIds": _string_list(material.get("evidenceIds")) or ([evidence_id] if evidence_id else []),
             }
         )
     return {
         "status": "references_recorded" if items else "not_provided",
+        "ingestionStatus": _text(material_ingestion.get("status")),
+        "received": _int_or_none(material_ingestion.get("received")) or 0,
+        "accepted": _int_or_none(material_ingestion.get("accepted")) or 0,
+        "skippedCount": _int_or_none(material_ingestion.get("skippedCount")) or 0,
         "items": [item for item in items if item.get("materialId") or item.get("label")],
         "rawMaterialContentPersisted": False,
     }
