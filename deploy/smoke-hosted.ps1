@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 if ([string]::IsNullOrWhiteSpace($ApiBaseUrl)) {
     $summaryPath = Join-Path $PSScriptRoot "hosted-mvp-summary.json"
@@ -21,7 +22,15 @@ function Invoke-JsonPost {
     Invoke-RestMethod -Method Post -Uri "$base$Path" -ContentType "application/json" -Body ($Body | ConvertTo-Json -Depth 8)
 }
 
-$health = Invoke-RestMethod -Method Get -Uri "$base/health"
+try {
+    $health = Invoke-RestMethod -Method Get -Uri "$base/health"
+} catch {
+    Write-Warning "PowerShell HTTP smoke failed at health check; falling back to Python hosted smoke. $($_.Exception.Message)"
+    $pythonArgs = @("deploy\smoke-hosted.py", "--api-base-url", $base, "--private-file", $PrivateFile)
+    if ($IncludeUnsafe) { $pythonArgs += "--include-unsafe" }
+    python @pythonArgs
+    exit $LASTEXITCODE
+}
 
 $unauthorizedStatus = $null
 try {
@@ -120,6 +129,26 @@ if ($foxgloveNameRun.result.uiState.reviewMode -ne "provisional checklist pendin
 }
 if ($foxgloveNameRun.result.uiState.scene -ne $null) {
     throw "Foxglove name-only smoke must not produce a site-specific scene."
+}
+
+$coordinateOnlyRun = Invoke-JsonPost "/api/runs" @{
+    sessionId = $session.sessionId
+    message = "I want to visit 50.825351, -0.125125 tomorrow for a survey."
+    uploadedFileIds = @()
+    useBedrock = $false
+    autoStart = $true
+}
+if ($coordinateOnlyRun.status -ne "waiting_for_location_confirmation") {
+    throw "Coordinate-only smoke expected location confirmation before review workflow."
+}
+if (@($coordinateOnlyRun.result.locationCandidates).Count -lt 1) {
+    throw "Coordinate-only smoke expected one user-supplied coordinate candidate."
+}
+if ($coordinateOnlyRun.result.locationCandidates[0].name -ne "Coordinate 50.825351, -0.125125") {
+    throw "Coordinate-only smoke regressed to an unsafe label: $($coordinateOnlyRun.result.locationCandidates[0].name)"
+}
+if ($coordinateOnlyRun.modelCallsUsed -ne 0) {
+    throw "Coordinate-only smoke should not spend model calls before location confirmation."
 }
 
 $solarCoordinateRun = Invoke-JsonPost "/api/runs" @{
@@ -234,6 +263,9 @@ if ($IncludeUnsafe) {
     greenacreConfirmedLocation = $greenacreConfirm.result.uiState.location.label
     foxgloveNameStatus = $foxgloveNameRun.status
     foxgloveNameReviewMode = $foxgloveNameRun.result.uiState.reviewMode
+    coordinateOnlyStatus = $coordinateOnlyRun.status
+    coordinateOnlyCandidateName = $coordinateOnlyRun.result.locationCandidates[0].name
+    coordinateOnlyModelCallsUsed = $coordinateOnlyRun.modelCallsUsed
     solarCoordinateStatus = $solarCoordinateRun.status
     solarCoordinateCandidateSource = $solarCoordinateRun.result.locationCandidates[0].source
     solarCoordinateLocation = $solarCoordinateConfirm.result.uiState.location.label
