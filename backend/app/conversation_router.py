@@ -87,6 +87,10 @@ _HELP_PHRASES = {
     "what can you do",
     "what do you need",
 }
+_PRODUCT_META_RE = re.compile(
+    r"\b(?:llm|model|bedrock|claude|agent\s*core|agentcore|runtime|framework|orchestrator)\b",
+    re.IGNORECASE,
+)
 _TOOL_PROMISE_RE = re.compile(
     r"\b(?:let me|i(?:'|’)?m|i am|i(?:'|’)?ll|i will|i can(?: now)?|i(?:'|’)?d like to)\b"
     r".{0,48}\b"
@@ -127,6 +131,8 @@ def handle_conversation_message(
     route = _validated_route(orchestration, deterministic_route, memory, intent)
     if route in {"conversation", "greeting", "help"}:
         return _orchestrated_conversation_response(session_id, route, orchestration, memory, intent, config)
+    if route == "product_meta":
+        return _product_meta_response(session_id, orchestration, memory, intent, config)
     if route == "status":
         return _status_response(session_id, memory, intent, config)
     if route == "follow_up":
@@ -204,6 +210,8 @@ def _classify_message(message: str, memory: dict[str, Any], intent: dict[str, An
         return "greeting"
     if lower in _HELP_PHRASES:
         return "help"
+    if _is_product_meta_question(lower):
+        return "product_meta"
     if lower in _STATUS_PHRASES or any(lower.startswith(f"{phrase} ") for phrase in _STATUS_PHRASES):
         return "status"
     if _starts_with_any(lower, _START_OVER_PHRASES):
@@ -292,6 +300,8 @@ def _validated_route(
 
     if orchestration.get("failed"):
         return deterministic_route
+    if deterministic_route in {"product_meta", "status"}:
+        return deterministic_route
     if pending in {"confirm_or_correct_location", "provide_corrected_location"}:
         return _validated_pending_location_route(
             route=route,
@@ -301,12 +311,7 @@ def _validated_route(
             has_site_signal=has_site_signal,
             unsafe_intent=bool(intent.get("unsafeIntent")),
         )
-    if deterministic_route in {
-        "status",
-        "location_correction",
-        "start_over_without_site",
-        "start_over_with_site",
-    }:
+    if deterministic_route in {"location_correction", "start_over_without_site", "start_over_with_site"}:
         return deterministic_route
     if intent.get("unsafeIntent"):
         if orchestration.get("shouldStartRun") is False:
@@ -314,7 +319,7 @@ def _validated_route(
         return "new_run"
     if (
         orchestration.get("shouldStartRun") is False
-        and route in {"conversation", "greeting", "help", "follow_up", "status"}
+        and route in {"conversation", "greeting", "help", "follow_up", "status", "product_meta"}
         and not intent.get("namedSiteHint")
         and not has_location_evidence
     ):
@@ -332,8 +337,8 @@ def _validated_route(
             return "new_run" if route != "location_correction" else "location_correction"
         return "conversation"
     if not has_site_signal and not intent.get("unsafeIntent"):
-        return route if route in {"conversation", "greeting", "help", "follow_up", "status"} else "conversation"
-    if route in {"conversation", "greeting", "help", "follow_up", "status"}:
+        return route if route in {"conversation", "greeting", "help", "follow_up", "status", "product_meta"} else "conversation"
+    if route in {"conversation", "greeting", "help", "follow_up", "status", "product_meta"}:
         return route
     return deterministic_route
 
@@ -372,6 +377,12 @@ def _has_site_signal(intent: dict[str, Any]) -> bool:
         or intent.get("hasLocationEvidence")
         or intent.get("vagueLocationHint")
     )
+
+
+def _is_product_meta_question(lower: str) -> bool:
+    if not (_looks_like_question(lower) or any(token in lower for token in {"llm", "bedrock", "agentcore", "agent core"})):
+        return False
+    return bool(_PRODUCT_META_RE.search(lower))
 
 
 def _orchestrated_conversation_response(
@@ -529,6 +540,60 @@ def _status_response(session_id: str, memory: dict[str, Any], intent: dict[str, 
         "trace": _conversation_trace("status", None, intent, memory, observability),
         "modelCalls": [],
         "runtime": _runtime_contract(config, "lambda-adapter-active"),
+    }
+
+
+def _product_meta_response(
+    session_id: str,
+    orchestration: dict[str, Any] | None,
+    memory: dict[str, Any],
+    intent: dict[str, Any],
+    config: RuntimeConfig,
+) -> dict[str, Any]:
+    runtime = _runtime_contract(config, "lambda-adapter-active")
+    model_text = (
+        f"{config.bedrock_model_id} via Amazon Bedrock in {config.aws_region}"
+        if config.bedrock_enabled
+        else "Bedrock is not enabled for this request, so the deterministic fallback/router is active."
+    )
+    agentcore_text = (
+        "AgentCore Runtime is configured."
+        if runtime["agentCoreStatus"] == "configured"
+        else "AgentCore is not the active runtime for this hosted MVP; the current product runs through API Gateway, Lambda, and FastAPI."
+    )
+    text = (
+        "I am 3D-RAMS FieldBrief Agent. "
+        f"For LLM-backed turns, the configured model path is {model_text}. "
+        f"{agentcore_text} "
+        "I can show model-call counts, tool steps, source labels, confidence, and safety-gate results in the trace panels, "
+        "but I do not expose hidden chain-of-thought. I did not start map, evidence, risk, or briefing tools for this metadata question."
+    )
+    observability = _conversation_observability("product_meta", orchestration, intent, memory, tools_started=False)
+    observability["phase"] = "product_metadata"
+    observability["noToolReason"] = "Answered a runtime/model metadata question; no site-review tools were needed."
+    conversation_state = _conversation_state(orchestration, intent, "product_meta", tools_started=False)
+    add_conversation_turn(
+        session_id,
+        role="assistant",
+        text=text,
+        metadata={
+            "route": "product_meta",
+            "conversationOrchestrator": _orchestration_metadata(orchestration),
+            "conversationState": conversation_state,
+            "observability": observability,
+        },
+        config=config,
+    )
+    update_working_memory(session_id, config, latestRoute="product_meta")
+    return {
+        "action": "answered_from_memory",
+        "route": "product_meta",
+        "assistantMessage": text,
+        "conversationState": conversation_state,
+        "observability": observability,
+        "trace": _conversation_trace("product_meta", orchestration, intent, memory, observability),
+        "modelCalls": _conversation_model_calls(orchestration),
+        "runtime": runtime,
     }
 
 

@@ -372,6 +372,53 @@ class DurableRunApiTests(unittest.TestCase):
         self.assertIn("follow_up_confusion", session_state["workingMemory"]["latestEvaluationSummary"]["userConfusionTags"])
         self.assertEqual(session_state["workingMemory"]["latestEvaluationSummary"]["recommendedNextTest"], "follow_up_confusion_regression")
 
+    def test_conversation_model_question_answers_runtime_metadata_not_previous_step(self):
+        with EnvPatch(
+            ENABLE_BEDROCK="true",
+            APP_ACCESS_TOKEN_HASH=None,
+            DURABLE_RUN_PROCESS_INLINE="true",
+        ), patch(
+            "app.conversation_router.generate_bedrock_conversation_orchestration",
+            return_value=(
+                {
+                    "route": "follow_up",
+                    "assistantMessage": "I was referring to the previous step.",
+                    "shouldStartRun": False,
+                    "pendingUserAction": None,
+                    "reason": "Overbroad follow-up classification.",
+                },
+                {"provider": "bedrock", "phase": "conversation-orchestrator", "modelCallCount": 1},
+            ),
+        ):
+            session = self._session()
+            first = self.client.post(
+                "/api/conversation/message",
+                json={
+                    "sessionId": session["sessionId"],
+                    "message": "I want to visit Greenacre Solar Farm tomorrow for a survey. Please prepare a pre-visit RAMS-style review pack.",
+                    "useBedrock": True,
+                },
+            ).json()
+            response = self.client.post(
+                "/api/conversation/message",
+                json={
+                    "sessionId": session["sessionId"],
+                    "message": "What LLM model are you?",
+                    "useBedrock": True,
+                },
+            ).json()
+            session_state = self.client.get(f"/api/session/{session['sessionId']}").json()
+
+        self.assertEqual(first["action"], "started_run")
+        self.assertEqual(response["action"], "answered_from_memory")
+        self.assertEqual(response["route"], "product_meta")
+        self.assertIn("anthropic.claude-3-7-sonnet-20250219-v1:0", response["assistantMessage"])
+        self.assertIn("Amazon Bedrock", response["assistantMessage"])
+        self.assertIn("did not start map, evidence, risk, or briefing tools", response["assistantMessage"])
+        self.assertNotIn("previous step", response["assistantMessage"].lower())
+        self.assertEqual(len(session_state["runs"]), 1)
+        self.assertEqual(session_state["workingMemory"]["latestRoute"], "product_meta")
+
     def test_conversation_greeting_does_not_become_fake_site_run_without_bedrock(self):
         with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None, DURABLE_RUN_PROCESS_INLINE="true"):
             session = self._session()
