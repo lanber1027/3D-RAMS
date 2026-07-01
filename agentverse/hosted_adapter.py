@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 import re
 import uuid
@@ -104,7 +102,7 @@ def _report_access(case_id: str, session_id: str) -> dict:
     return access
 
 
-def _case_id_from_prompt(prompt: str) -> str | None:
+def _case_id_from_prompt(prompt: str):
     match = CASE_REF_RE.search(prompt)
     return match.group(1) if match else None
 
