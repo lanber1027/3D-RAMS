@@ -111,7 +111,10 @@ def _case_id_from_prompt(prompt: str) -> str | None:
 
 def _looks_like_confirmation(prompt: str) -> bool:
     normalized = prompt.strip().lower()
-    return normalized in {"yes", "yes please", "confirm", "confirmed", "launch", "go", "go ahead"} or "confirm and launch" in normalized or "please launch" in normalized
+    return bool(
+        normalized in {"yes", "yes please", "confirm", "confirmed", "launch", "go", "go ahead"}
+        or re.search(r"\b(confirm|confirmed|proceed|go ahead|launch)\b", normalized)
+    )
 
 
 def _remember_pending_intake(session_id: str, response_text: str) -> None:

@@ -31,7 +31,10 @@ class HostedAdapterPayloadTests(unittest.TestCase):
         self.assertEqual(payload["reportAccess"]["authorizedCaseIds"], ["case_ec2310c77382"])
 
     def test_entry_turn_payload_carries_session_report_access(self):
-        payload = self.hosted_adapter._entry_turn_payload("Confirm", "agentverse-session")
+        payload = self.hosted_adapter._entry_turn_payload(
+            "Confirmed. Proceed with the review-required workflow.",
+            "agentverse-session",
+        )
 
         self.assertTrue(payload["entryTurn"])
         self.assertTrue(payload["confirmedByUser"])
