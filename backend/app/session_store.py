@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from typing import Any
@@ -12,6 +13,21 @@ from .config import RuntimeConfig
 _SESSIONS: dict[str, dict[str, Any]] = {}
 _MAX_TURNS = 12
 _MAX_TURN_TEXT = 1200
+_MAX_LLM_CONTEXT_TURNS = 6
+_MAX_LLM_CONTEXT_STRING = 160
+_SENSITIVE_CONTEXT_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"https?://",
+        r"\baccess\s*code\b",
+        r"\b(access|api|secret|private|session|run)[\s_-]?(token|key|code|id)\b",
+        r"\bsession-[a-z0-9-]{8,}\b",
+        r"\brun-[a-z0-9-]{8,}\b",
+        r"\b3drams-[a-z0-9-]{8,}\b",
+        r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+        r"\b[0-9a-f]{24,}\b",
+    )
+]
 
 
 def create_session(*, tester_alias: str | None, access_label: str, config: RuntimeConfig) -> dict[str, Any]:
@@ -119,6 +135,39 @@ def public_session(session: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def llm_session_context(session: dict[str, Any]) -> dict[str, Any]:
+    """Return bounded, public-safe session context for model prompts."""
+    memory = session.get("workingMemory", _default_working_memory())
+    confirmed_location = memory.get("confirmedLocation") or {}
+    latest_location_resolution = memory.get("latestLocationResolution") or {}
+    recent_turns = []
+    for turn in session.get("conversationTurns", [])[-_MAX_LLM_CONTEXT_TURNS:]:
+        metadata = turn.get("metadata") or {}
+        route = metadata.get("route") or ("user_input" if metadata.get("routeInput") else None)
+        recent_turns.append(
+            {
+                "role": turn.get("role"),
+                "summary": _turn_summary(turn.get("role"), turn.get("text", "")),
+                "route": route,
+            }
+        )
+    return {
+        "contextType": "bounded-session-summary",
+        "privacyBoundary": "No raw turn text, access codes, upload URLs, raw files, session ids, or run ids are included.",
+        "recentTurns": recent_turns,
+        "workingMemory": {
+            "pendingUserAction": memory.get("pendingUserAction"),
+            "latestRunStatus": memory.get("latestRunStatus"),
+            "latestSafetyLevel": memory.get("latestSafetyLevel"),
+            "latestBriefingMode": memory.get("latestBriefingMode"),
+            "latestRoute": memory.get("latestRoute"),
+            "confirmedLocation": _location_summary(confirmed_location),
+            "latestLocationResolution": _location_resolution_summary(latest_location_resolution),
+            "latestReviewSummary": _review_summary(memory.get("latestReviewSummary")),
+        },
+    }
+
+
 def _stored_upload(upload: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
@@ -146,6 +195,81 @@ def _default_working_memory() -> dict[str, Any]:
 
 def _truncate(text: str) -> str:
     return " ".join(str(text).split())[:_MAX_TURN_TEXT]
+
+
+def _turn_summary(role: Any, text: Any) -> dict[str, Any]:
+    if role == "user":
+        try:
+            from .site_intent import parse_site_intent
+
+            intent = parse_site_intent(str(text))
+            coordinate = intent.get("coordinate")
+            return {
+                "kind": "user_site_intent",
+                "siteName": _safe_context_string(intent.get("siteName")),
+                "hasCoordinate": coordinate is not None,
+                "coordinate": {"latitude": coordinate[0], "longitude": coordinate[1]} if coordinate else None,
+                "postcode": _safe_context_string(intent.get("postcode"), max_length=12),
+                "outcode": _safe_context_string(intent.get("outcode"), max_length=8),
+                "nearestTown": _safe_context_string(intent.get("nearestTown")),
+                "siteTypes": [_safe_context_string(item, max_length=40) for item in intent.get("siteTypes", [])],
+                "activities": [_safe_context_string(item, max_length=40) for item in intent.get("activities", [])],
+                "visitDate": _safe_context_string(intent.get("visitDate"), max_length=40),
+                "unsafeIntent": intent.get("unsafeIntent"),
+                "knownPublicFixture": intent.get("knownPublicFixture"),
+            }
+        except Exception:
+            return {"kind": "user_message", "summaryUnavailable": True}
+    return {
+        "kind": "assistant_message",
+        "containsClarificationQuestion": "?" in str(text),
+    }
+
+
+def _location_summary(location: Any) -> dict[str, Any] | None:
+    if not isinstance(location, dict) or not location:
+        return None
+    return {
+        "name": _safe_context_string(location.get("name") or location.get("label")),
+        "latitude": location.get("latitude"),
+        "longitude": location.get("longitude"),
+        "source": _safe_context_string(location.get("source"), max_length=60),
+        "confidence": _safe_context_string(location.get("confidence"), max_length=40),
+        "dataMode": _safe_context_string(location.get("dataMode"), max_length=40),
+    }
+
+
+def _location_resolution_summary(location_resolution: Any) -> dict[str, Any] | None:
+    if not isinstance(location_resolution, dict) or not location_resolution:
+        return None
+    candidates = location_resolution.get("locationCandidates") or []
+    return {
+        "siteName": _safe_context_string(location_resolution.get("siteName")),
+        "needsLocationConfirmation": location_resolution.get("needsLocationConfirmation"),
+        "nextStage": _safe_context_string(location_resolution.get("nextStage"), max_length=60),
+        "candidateCount": len(candidates) if isinstance(candidates, list) else 0,
+    }
+
+
+def _review_summary(review: Any) -> dict[str, Any] | None:
+    if not isinstance(review, dict) or not review:
+        return None
+    return {
+        "status": _safe_context_string(review.get("status"), max_length=60),
+        "headline": _safe_context_string(review.get("headline")),
+        "generationMode": _safe_context_string(review.get("generationMode"), max_length=60),
+    }
+
+
+def _safe_context_string(value: Any, *, max_length: int = _MAX_LLM_CONTEXT_STRING) -> str | None:
+    if value is None:
+        return None
+    text = " ".join(str(value).split())
+    if not text:
+        return None
+    if any(pattern.search(text) for pattern in _SENSITIVE_CONTEXT_PATTERNS):
+        return None
+    return text[:max_length]
 
 
 def _safe_metadata(metadata: dict[str, Any]) -> dict[str, Any]:

@@ -703,6 +703,229 @@ class DurableRunApiTests(unittest.TestCase):
         self.assertEqual(result["runtime"]["phaseTokenBudgets"]["reasoner"], 1500)
         self.assertEqual(result["runtime"]["phaseTokenBudgets"]["compiler"], 2200)
 
+    def test_conversation_durable_planner_receives_sanitized_session_context(self):
+        from app.tool_registry import default_tool_sequence
+
+        captured = {}
+
+        def fake_tool_plan(*, config, request_summary, tool_schemas, session_context=None):
+            captured["sessionContext"] = session_context
+            return {
+                "rationale": "Use the standard bounded review workflow.",
+                "tool_calls": [{"name": name, "arguments": {}} for name in default_tool_sequence()],
+            }, {
+                "mode": "test",
+                "phase": "planner-plan",
+                "modelCallCount": 1,
+            }
+
+        with EnvPatch(
+            ENABLE_BEDROCK="true",
+            BEDROCK_MAX_MODEL_CALLS="1",
+            APP_ACCESS_TOKEN_HASH=None,
+            DURABLE_RUN_PROCESS_INLINE="true",
+        ), patch("app.durable_runner.generate_bedrock_tool_plan", side_effect=fake_tool_plan):
+            session = self._session()
+            response = self.client.post(
+                "/api/conversation/message",
+                json={
+                    "sessionId": session["sessionId"],
+                    "message": "I want to visit 8 Albert Embankment tomorrow for a survey.",
+                    "useBedrock": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        context = captured["sessionContext"]
+        self.assertEqual(context["contextType"], "bounded-session-summary")
+        self.assertIn("access codes", context["privacyBoundary"])
+        self.assertEqual(context["recentTurns"][-1]["role"], "user")
+        self.assertEqual(context["recentTurns"][-1]["summary"]["siteName"], "8 Albert Embankment")
+        self.assertEqual(context["recentTurns"][-1]["route"], "user_input")
+        serialized = str(context)
+        self.assertNotIn("I want to visit", serialized)
+        self.assertNotIn(session["sessionId"], serialized)
+        self.assertNotIn("run-", serialized)
+        self.assertNotIn("accessCode", serialized)
+
+    def test_all_bedrock_phases_receive_bounded_session_context(self):
+        from app.tool_registry import default_tool_sequence
+
+        captured = {}
+
+        def fake_tool_plan(*, config, request_summary, tool_schemas, session_context=None):
+            captured["planner"] = session_context
+            return {
+                "rationale": "Use the standard bounded review workflow.",
+                "tool_calls": [{"name": name, "arguments": {}} for name in default_tool_sequence()],
+            }, {"mode": "test", "phase": "planner-plan", "modelCallCount": 1}
+
+        def fake_reasoning(*, config, location, hazards, evidence, executed_tools, session_context=None):
+            captured["reasoner"] = session_context
+            return {
+                "ranked_risks": [],
+                "uncertainties": [],
+                "approval_required": True,
+            }, {"mode": "test", "phase": "risk-reasoner", "modelCallCount": 1}
+
+        def fake_synthesis(*, config, location, hazards, deterministic_briefing, evidence, planning_available, executed_tools, session_context=None):
+            captured["compiler"] = session_context
+            briefing = dict(deterministic_briefing)
+            briefing["generation_mode"] = "test-llm-context"
+            return briefing, {"mode": "test", "phase": "planner-synthesis", "modelCallCount": 1}
+
+        def fake_evaluator(*, config, deterministic_evaluation, location, hazards, evidence, briefing, executed_tools, session_context=None):
+            captured["evaluator"] = session_context
+            evaluation = dict(deterministic_evaluation)
+            evaluation["passed"] = True
+            evaluation["scores"] = {"grounding": 1.0, "relevance": 1.0, "completeness": 1.0, "safety": 1.0}
+            evaluation["issues"] = []
+            evaluation["retryTools"] = []
+            return evaluation, {"mode": "test", "phase": "output-evaluator", "modelCallCount": 1}
+
+        with EnvPatch(
+            ENABLE_BEDROCK="true",
+            BEDROCK_MAX_MODEL_CALLS="4",
+            APP_ACCESS_TOKEN_HASH=None,
+            DURABLE_RUN_PROCESS_INLINE="true",
+        ), patch("app.durable_runner.generate_bedrock_tool_plan", side_effect=fake_tool_plan), patch(
+            "app.durable_runner.generate_bedrock_risk_reasoning", side_effect=fake_reasoning
+        ), patch(
+            "app.durable_runner.generate_bedrock_planner_synthesis", side_effect=fake_synthesis
+        ), patch(
+            "app.durable_runner.generate_bedrock_output_evaluation", side_effect=fake_evaluator
+        ):
+            session = self._session()
+            response = self.client.post(
+                "/api/conversation/message",
+                json={
+                    "sessionId": session["sessionId"],
+                    "message": "I want to visit 8 Albert Embankment tomorrow for a survey.",
+                    "useBedrock": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(captured), {"planner", "reasoner", "compiler", "evaluator"})
+        for context in captured.values():
+            self.assertEqual(context["contextType"], "bounded-session-summary")
+            self.assertEqual(context["recentTurns"][-1]["summary"]["siteName"], "8 Albert Embankment")
+            self.assertNotIn(session["sessionId"], str(context))
+
+    def test_llm_session_context_sanitizes_turns_and_working_memory(self):
+        from app.config import RuntimeConfig
+        from app.session_store import add_conversation_turn, create_session, llm_session_context, update_working_memory
+
+        with EnvPatch(APP_ACCESS_TOKEN_HASH=None):
+            config = RuntimeConfig.from_env(request_bedrock=False)
+            session = create_session(tester_alias="qa-memory", access_label="team-test", config=config)
+            add_conversation_turn(
+                session["sessionId"],
+                role="user",
+                text="I want to visit 50.825351, -0.125125 tomorrow. access code is 3drams-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa. https://example.invalid/private.pdf",
+                metadata={"routeInput": True, "accessCode": "should-not-appear", "uploadUrl": "https://example.invalid/upload"},
+                config=config,
+            )
+            add_conversation_turn(
+                session["sessionId"],
+                role="assistant",
+                text="Confirm this site before tools run.",
+                metadata={"route": "follow_up", "runId": "run-private"},
+                config=config,
+            )
+            update_working_memory(
+                session["sessionId"],
+                config,
+                pendingUserAction="confirm_or_correct_location",
+                activeRunId="run-private",
+                confirmedLocation={
+                    "name": "Coordinate 50.825351, -0.125125",
+                    "latitude": 50.825351,
+                    "longitude": -0.125125,
+                    "source": "user-supplied-coordinate",
+                    "confidence": "medium",
+                },
+            )
+            context = llm_session_context(session)
+
+        self.assertEqual(context["workingMemory"]["pendingUserAction"], "confirm_or_correct_location")
+        self.assertEqual(context["workingMemory"]["confirmedLocation"]["name"], "Coordinate 50.825351, -0.125125")
+        self.assertEqual(len(context["recentTurns"]), 2)
+        self.assertNotIn("text", context["recentTurns"][0])
+        self.assertTrue(context["recentTurns"][0]["summary"]["hasCoordinate"])
+        serialized = str(context)
+        self.assertNotIn("should-not-appear", serialized)
+        self.assertNotIn("3drams-", serialized)
+        self.assertNotIn("example.invalid", serialized)
+        self.assertNotIn("uploadUrl", serialized)
+        self.assertNotIn("run-private", serialized)
+        self.assertNotIn(session["sessionId"], serialized)
+
+    def test_llm_session_context_omits_sensitive_parser_derived_labels(self):
+        from app.config import RuntimeConfig
+        from app.session_store import add_conversation_turn, create_session, llm_session_context, update_working_memory
+
+        with EnvPatch(APP_ACCESS_TOKEN_HASH=None):
+            config = RuntimeConfig.from_env(request_bedrock=False)
+            session = create_session(tester_alias="qa-memory", access_label="team-test", config=config)
+            sensitive_prompts = [
+                "Please visit access code is 3drams-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa for survey.",
+                "Please visit https://example.invalid/private.pdf for survey.",
+                "Please visit session-deadbeefdeadbeef and run-deadbeefdeadbeef for survey.",
+                "Please visit api key is sk-test-12345 for survey.",
+                "Please visit secret key is abc123 for survey.",
+                "Please visit private key is abc123 for survey.",
+                "Please visit session id is abc123 for survey.",
+                "Please visit run id is abc123 for survey.",
+            ]
+            for prompt in sensitive_prompts:
+                add_conversation_turn(
+                    session["sessionId"],
+                    role="user",
+                    text=prompt,
+                    metadata={"routeInput": True},
+                    config=config,
+                )
+            update_working_memory(
+                session["sessionId"],
+                config,
+                latestLocationResolution={
+                    "siteName": "https://example.invalid/private.pdf",
+                    "needsLocationConfirmation": True,
+                    "nextStage": "waiting_for_location_confirmation",
+                    "locationCandidates": [{"label": "redacted"}],
+                },
+                confirmedLocation={
+                    "name": "run-deadbeefdeadbeef",
+                    "latitude": 50.825351,
+                    "longitude": -0.125125,
+                    "source": "user-supplied-coordinate",
+                    "confidence": "medium",
+                },
+                latestReviewSummary={
+                    "status": "completed",
+                    "headline": "session-deadbeefdeadbeef should not be retained",
+                    "generationMode": "real",
+                },
+            )
+            context = llm_session_context(session)
+
+        serialized = str(context)
+        for turn in context["recentTurns"]:
+            self.assertIsNone(turn["summary"]["siteName"])
+        self.assertIsNone(context["workingMemory"]["latestLocationResolution"]["siteName"])
+        self.assertIsNone(context["workingMemory"]["confirmedLocation"]["name"])
+        self.assertIsNone(context["workingMemory"]["latestReviewSummary"]["headline"])
+        self.assertNotIn("3drams-", serialized)
+        self.assertNotIn("example.invalid", serialized)
+        self.assertNotIn("session-deadbeefdeadbeef", serialized)
+        self.assertNotIn("run-deadbeefdeadbeef", serialized)
+        self.assertNotIn("api key", serialized)
+        self.assertNotIn("secret key", serialized)
+        self.assertNotIn("private key", serialized)
+        self.assertNotIn("session id is", serialized)
+        self.assertNotIn("run id is", serialized)
+
     def test_llm_evaluator_upstream_retry_expands_downstream_dependencies(self):
         with EnvPatch(
             ENABLE_BEDROCK="true",

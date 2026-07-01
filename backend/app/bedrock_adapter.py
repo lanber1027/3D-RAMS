@@ -62,6 +62,7 @@ def generate_bedrock_tool_plan(
     config: RuntimeConfig,
     request_summary: dict[str, Any],
     tool_schemas: list[dict[str, Any]],
+    session_context: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if config.bedrock_simulate_failure:
         raise BedrockAdapterError("Simulated Bedrock failure requested by BEDROCK_SIMULATE_FAILURE.")
@@ -92,6 +93,7 @@ def generate_bedrock_tool_plan(
                 ],
             },
             "request": request_summary,
+            "session_context": session_context or {},
             "allowed_tools": tool_schemas,
             "max_tool_calls": 8,
         },
@@ -109,6 +111,7 @@ def generate_bedrock_planner_synthesis(
     evidence: list[dict[str, Any]],
     planning_available: bool,
     executed_tools: list[str],
+    session_context: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if config.bedrock_simulate_failure:
         raise BedrockAdapterError("Simulated Bedrock failure requested by BEDROCK_SIMULATE_FAILURE.")
@@ -146,6 +149,7 @@ def generate_bedrock_planner_synthesis(
             "evidence": evidence,
             "planning_available": planning_available,
             "executed_tools": executed_tools,
+            "session_context": session_context or {},
             "deterministic_fallback": deterministic_briefing,
         },
     )
@@ -161,6 +165,7 @@ def generate_bedrock_risk_reasoning(
     hazards: list[dict[str, Any]],
     evidence: list[dict[str, Any]],
     executed_tools: list[str],
+    session_context: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if config.bedrock_simulate_failure:
         raise BedrockAdapterError("Simulated Bedrock failure requested by BEDROCK_SIMULATE_FAILURE.")
@@ -201,6 +206,7 @@ def generate_bedrock_risk_reasoning(
             "hazards": hazards[:8],
             "evidence": evidence,
             "executed_tools": executed_tools,
+            "session_context": session_context or {},
         },
     )
     reasoning = _normalise_reasoning(_extract_json_object(response_text), hazards, evidence)
@@ -216,6 +222,7 @@ def generate_bedrock_output_evaluation(
     evidence: list[dict[str, Any]],
     briefing: dict[str, Any],
     executed_tools: list[str],
+    session_context: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if config.bedrock_simulate_failure:
         raise BedrockAdapterError("Simulated Bedrock failure requested by BEDROCK_SIMULATE_FAILURE.")
@@ -251,6 +258,7 @@ def generate_bedrock_output_evaluation(
             "evidence": evidence,
             "briefing": briefing,
             "executed_tools": executed_tools,
+            "session_context": session_context or {},
         },
     )
     evaluation = _normalise_output_evaluation(_extract_json_object(response_text), deterministic_evaluation)

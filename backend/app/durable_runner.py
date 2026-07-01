@@ -26,7 +26,7 @@ from .run_store import (
     request_cancel,
     update_run,
 )
-from .session_store import add_run, get_session
+from .session_store import add_run, get_session, llm_session_context
 from .tool_registry import ToolExecutionError, default_tool_sequence, execute_tool, tool_schemas
 from .tools import architecture_snapshot, normalize_request, source_register, trace_step
 
@@ -202,6 +202,7 @@ def execute_durable_run(run_id: str, config: RuntimeConfig) -> None:
         "requestSummary": request_summary,
         "fixturePack": fixture_pack,
         "fixturePackWarning": fixture_pack_warning,
+        "sessionContext": _bounded_session_context(run["sessionId"], config),
         "executedTools": [],
         "trace": parse_trace[:],
     }
@@ -218,7 +219,7 @@ def execute_durable_run(run_id: str, config: RuntimeConfig) -> None:
 
     try:
         _checkpoint(run_id, "planner", "running", "Selecting allowlisted tools for the durable run.", deadline=deadline)
-        tool_plan = _plan_tools(run_id, request_summary, config)
+        tool_plan = _plan_tools(run_id, request_summary, context["sessionContext"], config)
         _checkpoint(
             run_id,
             "tool_loop",
@@ -241,7 +242,12 @@ def execute_durable_run(run_id: str, config: RuntimeConfig) -> None:
         _finish_failed(run_id, exc)
 
 
-def _plan_tools(run_id: str, request_summary: dict[str, Any], config: RuntimeConfig) -> list[str]:
+def _plan_tools(
+    run_id: str,
+    request_summary: dict[str, Any],
+    session_context: dict[str, Any],
+    config: RuntimeConfig,
+) -> list[str]:
     if _consume_model_call(run_id, config, phase="planner"):
         try:
             phase_config = replace(config, bedrock_max_tokens=config.planner_output_tokens)
@@ -249,6 +255,7 @@ def _plan_tools(run_id: str, request_summary: dict[str, Any], config: RuntimeCon
                 config=phase_config,
                 request_summary=request_summary,
                 tool_schemas=tool_schemas(),
+                session_context=session_context,
             )
             requested = [_normalise_tool_name(str(call.get("name", ""))) for call in plan.get("tool_calls", [])]
             validation = _validate_tool_plan(requested)
@@ -384,6 +391,7 @@ def _reason_over_risks(
                 hazards=context.get("hazards", []),
                 evidence=context.get("evidence", []),
                 executed_tools=context.get("executedTools", []),
+                session_context=context.get("sessionContext", {}),
             )
             append_step(
                 run_id,
@@ -451,6 +459,7 @@ def _compile_output(
                 evidence=context["evidence"],
                 planning_available=context.get("planningText") is not None,
                 executed_tools=context["executedTools"],
+                session_context=context.get("sessionContext", {}),
             )
             context["briefing"] = briefing
             append_step(
@@ -820,6 +829,7 @@ def _maybe_run_llm_evaluator(
             evidence=context.get("evidence", []),
             briefing=context.get("briefing", {}),
             executed_tools=context.get("executedTools", []),
+            session_context=context.get("sessionContext", {}),
         )
         append_step(
             run_id,
@@ -1377,6 +1387,19 @@ def _dedupe_tools(tools: list[str]) -> list[str]:
             deduped.append(name)
             seen.add(name)
     return deduped
+
+
+def _bounded_session_context(session_id: str, config: RuntimeConfig) -> dict[str, Any]:
+    try:
+        return llm_session_context(get_session(session_id, config))
+    except Exception:
+        return {
+            "contextType": "bounded-session-summary",
+            "privacyBoundary": "No access codes, upload URLs, raw files, session ids, or run ids are included.",
+            "recentTurns": [],
+            "workingMemory": {},
+            "fallbackReason": "session_context_unavailable",
+        }
 
 
 def _raise_if_stopped(run_id: str, deadline: float | None = None) -> None:
