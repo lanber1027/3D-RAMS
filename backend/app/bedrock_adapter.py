@@ -207,6 +207,56 @@ def generate_bedrock_risk_reasoning(
     return reasoning, _metadata(config, started, "bedrock", phase="risk-reasoner", model_call_count=1)
 
 
+def generate_bedrock_output_evaluation(
+    *,
+    config: RuntimeConfig,
+    deterministic_evaluation: dict[str, Any],
+    location: dict[str, Any],
+    hazards: list[dict[str, Any]],
+    evidence: list[dict[str, Any]],
+    briefing: dict[str, Any],
+    executed_tools: list[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if config.bedrock_simulate_failure:
+        raise BedrockAdapterError("Simulated Bedrock failure requested by BEDROCK_SIMULATE_FAILURE.")
+
+    started = time.perf_counter()
+    if config.bedrock_mock_response:
+        scenario = os.getenv("BEDROCK_MOCK_EVALUATOR_SCENARIO", "").strip().lower()
+        evaluation = _mock_bedrock_output_evaluation(deterministic_evaluation, scenario)
+        return evaluation, _metadata(config, started, "bedrock-mock", phase="output-evaluator", model_call_count=1)
+
+    response_text = _invoke_bedrock_json(
+        config,
+        {
+            "task": "Evaluate whether the 3D-RAMS review pack is grounded, relevant, complete, and within safety boundaries.",
+            "safety_boundary": (
+                "Do not add new site facts. Do not certify RAMS, approve work, or provide emergency guidance. "
+                "Return only evaluation findings and retry recommendations using supplied tool names."
+            ),
+            "required_json_schema": {
+                "passed": "boolean",
+                "scores": {"grounding": "0..1", "relevance": "0..1", "completeness": "0..1", "safety": "0..1"},
+                "issues": [{"code": "string", "message": "string"}],
+                "retryTools": ["allowed tool name"],
+            },
+            "deterministic_evaluation": deterministic_evaluation,
+            "site": {
+                "label": location.get("label"),
+                "latitude": location.get("latitude"),
+                "longitude": location.get("longitude"),
+                "authority": location.get("authority"),
+            },
+            "hazards": hazards[:8],
+            "evidence": evidence,
+            "briefing": briefing,
+            "executed_tools": executed_tools,
+        },
+    )
+    evaluation = _normalise_output_evaluation(_extract_json_object(response_text), deterministic_evaluation)
+    return evaluation, _metadata(config, started, "bedrock", phase="output-evaluator", model_call_count=1)
+
+
 def _anthropic_payload(
     config: RuntimeConfig,
     location: dict[str, Any],
@@ -504,6 +554,62 @@ def _mock_bedrock_risk_reasoning(
     }
 
 
+def _mock_bedrock_output_evaluation(
+    deterministic_evaluation: dict[str, Any],
+    scenario: str,
+) -> dict[str, Any]:
+    evaluation = {
+        "passed": bool(deterministic_evaluation.get("passed")),
+        "scores": dict(deterministic_evaluation.get("scores") or {}),
+        "issues": list(deterministic_evaluation.get("issues") or []),
+        "retryTools": list(deterministic_evaluation.get("retryTools") or []),
+    }
+    if scenario == "fail-grounding":
+        evaluation["passed"] = False
+        evaluation["scores"]["grounding"] = 0.0
+        evaluation["issues"].append(
+            {
+                "code": "mock_llm_grounding_failure",
+                "message": "Mock evaluator requested an additional compile pass for grounding.",
+            }
+        )
+        evaluation["retryTools"].append("compile_review_pack")
+    return evaluation
+
+
+def _normalise_output_evaluation(
+    parsed: dict[str, Any],
+    deterministic_evaluation: dict[str, Any],
+) -> dict[str, Any]:
+    fallback_scores = deterministic_evaluation.get("scores") or {}
+    raw_scores = parsed.get("scores") if isinstance(parsed.get("scores"), dict) else {}
+    scores = {
+        "grounding": _score(raw_scores.get("grounding"), fallback_scores.get("grounding", 0.0)),
+        "relevance": _score(raw_scores.get("relevance"), fallback_scores.get("relevance", 0.0)),
+        "completeness": _score(raw_scores.get("completeness"), fallback_scores.get("completeness", 0.0)),
+        "safety": _score(raw_scores.get("safety"), fallback_scores.get("safety", 0.0)),
+    }
+    issues: list[dict[str, Any]] = []
+    raw_issues = parsed.get("issues")
+    if isinstance(raw_issues, list):
+        for item in raw_issues[:8]:
+            if not isinstance(item, dict):
+                continue
+            issues.append(
+                {
+                    "code": _text(item.get("code"), "llm_evaluator_issue"),
+                    "message": _text(item.get("message"), "Model evaluator reported a quality concern."),
+                }
+            )
+    retry_tools = _list(parsed.get("retryTools"), deterministic_evaluation.get("retryTools", []), 8)
+    return {
+        "passed": bool(parsed.get("passed", all(score >= 0.75 for score in scores.values()) and not issues)),
+        "scores": scores,
+        "issues": issues,
+        "retryTools": retry_tools,
+    }
+
+
 def _normalise_reasoning(
     parsed: dict[str, Any],
     hazards: list[dict[str, Any]],
@@ -578,3 +684,13 @@ def _list(value: Any, fallback: list[str], limit: int) -> list[str]:
         return fallback[:limit]
     items = [str(item).strip() for item in value if str(item).strip()]
     return items[:limit] if items else fallback[:limit]
+
+
+def _score(value: Any, fallback: Any) -> float:
+    try:
+        return min(max(float(value), 0.0), 1.0)
+    except (TypeError, ValueError):
+        try:
+            return min(max(float(fallback), 0.0), 1.0)
+        except (TypeError, ValueError):
+            return 0.0

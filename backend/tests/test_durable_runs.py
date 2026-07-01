@@ -67,6 +67,9 @@ class DurableRunApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(created["steps"]), 5)
         self.assertGreaterEqual(len(created["toolResults"]), 5)
         self.assertEqual(created["modelCallsUsed"], 0)
+        self.assertEqual(created["result"]["evaluationStopReason"], "passed")
+        self.assertTrue(created["result"]["evaluation"]["passed"])
+        self.assertEqual(created["runtime"]["evaluationLoopCount"], 1)
 
         read_back = self.client.get(f"/api/runs/{created['runId']}")
         self.assertEqual(read_back.status_code, 200)
@@ -238,6 +241,8 @@ class DurableRunApiTests(unittest.TestCase):
         self.assertEqual(created["result"]["nextStage"], "confirm_location")
         self.assertEqual(len(created["result"]["locationCandidates"]), 1)
         self.assertEqual(created["result"]["evidence"], [])
+        self.assertEqual(created["toolResults"], [])
+        self.assertNotIn("evaluationStopReason", created["result"])
 
         self.assertEqual(confirm.status_code, 202)
         result = confirm.json()
@@ -405,6 +410,115 @@ class DurableRunApiTests(unittest.TestCase):
         self.assertEqual(result["runtime"]["phaseTokenBudgets"]["planner"], 900)
         self.assertEqual(result["runtime"]["phaseTokenBudgets"]["reasoner"], 1500)
         self.assertEqual(result["runtime"]["phaseTokenBudgets"]["compiler"], 2200)
+
+    def test_poor_grounding_triggers_compile_retry_and_passes_after_loop(self):
+        from app import durable_runner
+        from app.tools import trace_step
+
+        original_execute_tool = durable_runner.execute_tool
+        compile_calls = {"count": 0}
+
+        def patched_execute_tool(tool_name, context):
+            if tool_name == "compile_review_pack":
+                compile_calls["count"] += 1
+                if compile_calls["count"] == 1:
+                    briefing = {
+                        "site": context["location"]["label"],
+                        "headline": "Ungrounded draft review pack.",
+                        "summary": ["This draft intentionally lacks evidence for retry testing."],
+                        "priority_checks": ["Unsupported invented site hazard"],
+                        "before_site_visit": ["Review current sources."],
+                        "limitations": ["Human review is required."],
+                    }
+                    context["briefing"] = briefing
+                    context["evidence"] = []
+                    return {
+                        "briefing": briefing,
+                        "evidence": [],
+                        "trace": trace_step(
+                            "generate_site_brief",
+                            "warning",
+                            "Test double returned an intentionally weak briefing.",
+                            {"mode": "test-weak-grounding", "evidence_count": 0},
+                        ),
+                    }
+            return original_execute_tool(tool_name, context)
+
+        with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None, DURABLE_RUN_PROCESS_INLINE="true"), patch(
+            "app.durable_runner.execute_tool",
+            side_effect=patched_execute_tool,
+        ):
+            session = self._session()
+            response = self._run(
+                session["sessionId"],
+                "I want to visit 8 Albert Embankment tomorrow for a survey.",
+            )
+
+        self.assertEqual(response.status_code, 202)
+        result = response.json()
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(compile_calls["count"], 2)
+        self.assertEqual(result["result"]["evaluationStopReason"], "passed_after_retry")
+        self.assertTrue(result["result"]["evaluation"]["passed"])
+        self.assertEqual(result["runtime"]["evaluationLoopCount"], 2)
+        self.assertTrue(any(step["name"] == "output_improvement_loop" for step in result["steps"]))
+
+    def test_persistent_poor_grounding_stops_at_max_evaluation_loops(self):
+        from app import durable_runner
+        from app.tools import trace_step
+
+        original_execute_tool = durable_runner.execute_tool
+        compile_calls = {"count": 0}
+
+        def patched_execute_tool(tool_name, context):
+            if tool_name == "compile_review_pack":
+                compile_calls["count"] += 1
+                briefing = {
+                    "site": context["location"]["label"],
+                    "headline": "Persistently ungrounded draft review pack.",
+                    "summary": ["This draft intentionally lacks evidence for max-loop testing."],
+                    "priority_checks": ["Unsupported invented site hazard"],
+                    "before_site_visit": ["Review current sources."],
+                    "limitations": ["Human review is required."],
+                }
+                context["briefing"] = briefing
+                context["evidence"] = []
+                return {
+                    "briefing": briefing,
+                    "evidence": [],
+                    "trace": trace_step(
+                        "generate_site_brief",
+                        "warning",
+                        "Test double returned a persistently weak briefing.",
+                        {"mode": "test-persistent-weak-grounding", "evidence_count": 0},
+                    ),
+                }
+            return original_execute_tool(tool_name, context)
+
+        with EnvPatch(
+            ENABLE_BEDROCK="false",
+            APP_ACCESS_TOKEN_HASH=None,
+            DURABLE_RUN_PROCESS_INLINE="true",
+            DURABLE_RUN_MAX_TOOL_CALLS="20",
+        ), patch(
+            "app.durable_runner.execute_tool",
+            side_effect=patched_execute_tool,
+        ):
+            session = self._session()
+            response = self._run(
+                session["sessionId"],
+                "I want to visit 8 Albert Embankment tomorrow for a survey.",
+            )
+
+        self.assertEqual(response.status_code, 202)
+        result = response.json()
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(compile_calls["count"], 3)
+        self.assertEqual(result["result"]["evaluationStopReason"], "max_evaluation_loops")
+        self.assertFalse(result["result"]["evaluation"]["passed"])
+        self.assertEqual(result["runtime"]["evaluationLoopCount"], 3)
+        self.assertEqual(result["result"]["briefing"]["generation_mode"], "deterministic-safer-fallback")
+        self.assertNotIn("Unsupported invented site hazard", result["result"]["briefing"]["priority_checks"])
 
     def test_durable_run_timeout_is_enforced(self):
         from app.durable_runner import _RunTimedOut

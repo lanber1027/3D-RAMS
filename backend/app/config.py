@@ -75,7 +75,7 @@ class RuntimeConfig:
             bedrock_max_tokens=_env_int("BEDROCK_MAX_TOKENS", 1200),
             bedrock_temperature=_env_float("BEDROCK_TEMPERATURE", 0.2),
             bedrock_max_model_calls=min(max(_env_int("BEDROCK_MAX_MODEL_CALLS", 2), 0), 3),
-            durable_run_max_tool_calls=min(max(_env_int("DURABLE_RUN_MAX_TOOL_CALLS", 10), 1), 20),
+            durable_run_max_tool_calls=min(max(_env_int("DURABLE_RUN_MAX_TOOL_CALLS", 12), 1), 20),
             durable_run_timeout_seconds=min(max(_env_int("DURABLE_RUN_TIMEOUT_SECONDS", 45), 5), 240),
             durable_run_process_inline=_env_bool("DURABLE_RUN_PROCESS_INLINE", False),
             planner_output_tokens=min(max(_env_int("BEDROCK_PLANNER_MAX_TOKENS", 900), 256), 3000),

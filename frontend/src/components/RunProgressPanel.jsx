@@ -38,6 +38,18 @@ const STAGES = [
     matches: ["compiler", "compiler_model_call", "compiler_model_budget_exhausted"],
   },
   {
+    key: "output_evaluation",
+    label: "Quality review / repair",
+    matches: [
+      "output_evaluation",
+      "evaluate_output_quality",
+      "output_improvement_loop",
+      "output_evaluation_stop",
+      "output_evaluator_model_call",
+      "output_evaluator_model_budget_exhausted",
+    ],
+  },
+  {
     key: "safety_gate",
     label: "Safety gate",
     matches: ["safety_gate"],
@@ -66,6 +78,10 @@ const TOOL_STEP_NAMES = new Set([
   "rank_risks",
   "create_annotations",
   "compile_review_pack",
+  "output_evaluation",
+  "evaluate_output_quality",
+  "output_improvement_loop",
+  "output_evaluator_model_call",
   "safety_gate",
   "llm_planner_tool_call",
 ]);
