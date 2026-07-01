@@ -20,6 +20,11 @@
     "upstream": {
       "type": ["object", "null"],
       "description": "Safe upstream ASI/ASI:ONE caller metadata. Raw identity tokens must not be included."
+    },
+    "useBedrock": {
+      "type": "boolean",
+      "description": "Whether this run requests Bedrock-backed material extraction when retrieved bytes/text are present.",
+      "default": true
     }
   }
 }

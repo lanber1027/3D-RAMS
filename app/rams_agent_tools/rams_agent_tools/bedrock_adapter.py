@@ -110,7 +110,7 @@ def generate_bedrock_subagent_plan(
             ),
             "required_json_schema": {
                 "rationale": "short string",
-                "initial_parallel_groups": ["geospatial_subagent", "planning_subagent"],
+                "initial_parallel_groups": ["geospatial_subagent", "planning_subagent", "material_subagent"],
                 "sequential_groups": ["hazard_subagent", "open_web_subagent", "review_guardrail"],
                 "report_parallel_groups": ["annotation_subagent", "briefing_subagent"],
                 "required_evidence": ["short strings"],
@@ -127,6 +127,115 @@ def generate_bedrock_subagent_plan(
     )
     plan = _normalise_subagent_plan(_extract_json_object(response_text))
     return plan, _metadata(config, started, "bedrock", phase="planner-plan", model_call_count=1)
+
+
+def generate_bedrock_material_extraction(
+    *,
+    config: RuntimeConfig,
+    material_id: str,
+    label: str,
+    content_type: str,
+    text: str | None = None,
+    document_bytes: bytes | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if config.bedrock_simulate_failure:
+        raise BedrockAdapterError("Simulated Bedrock failure requested by BEDROCK_SIMULATE_FAILURE.")
+    if config.bedrock_max_model_calls < 1:
+        raise BedrockAdapterError("Bedrock model call budget is zero.")
+
+    started = time.perf_counter()
+    if config.bedrock_mock_response:
+        extraction = _mock_material_extraction(label=label, content_type=content_type, text=text, document_bytes=document_bytes)
+        return extraction, _metadata(
+            config,
+            started,
+            "bedrock-mock",
+            phase="material-extraction",
+            model_id=config.material_extraction_model_id,
+            max_tokens=config.material_extraction_max_tokens,
+        )
+
+    content = _material_converse_content(
+        material_id=material_id,
+        label=label,
+        content_type=content_type,
+        text=text,
+        document_bytes=document_bytes,
+    )
+    try:
+        import boto3
+    except ImportError as exc:
+        raise BedrockAdapterError("boto3 is not installed in the AgentCore runtime environment.") from exc
+
+    session_kwargs = {}
+    if config.aws_profile:
+        session_kwargs["profile_name"] = config.aws_profile
+    session = boto3.Session(**session_kwargs)
+    client = session.client("bedrock-runtime", region_name=config.aws_region)
+    response = client.converse(
+        modelId=config.material_extraction_model_id,
+        messages=[{"role": "user", "content": content}],
+        inferenceConfig={"maxTokens": config.material_extraction_max_tokens, "temperature": 0.0},
+    )
+    response_text = "".join(
+        block.get("text", "")
+        for block in response.get("output", {}).get("message", {}).get("content", [])
+        if isinstance(block, dict)
+    )
+    extraction = _normalise_material_extraction(_extract_json_object(response_text), label=label)
+    return extraction, _metadata(
+        config,
+        started,
+        "bedrock",
+        phase="material-extraction",
+        model_id=config.material_extraction_model_id,
+        max_tokens=config.material_extraction_max_tokens,
+    )
+
+
+def _material_converse_content(
+    *,
+    material_id: str,
+    label: str,
+    content_type: str,
+    text: str | None,
+    document_bytes: bytes | None,
+) -> list[dict[str, Any]]:
+    prompt = {
+        "task": "Extract bounded material evidence for a draft 3D-RAMS human-review pack.",
+        "material": {"materialId": material_id, "label": label, "contentType": content_type},
+        "safety_boundary": (
+            "Return evidence only. Do not certify RAMS, approve work, provide emergency guidance, "
+            "or quote long private document passages."
+        ),
+        "required_json_schema": {
+            "summary": "one short sentence",
+            "confidence": "high | medium | low | unknown",
+            "observations": [
+                {
+                    "title": "short observation title",
+                    "category": "access | buried_services | planning | environment | hazard | other",
+                    "description": "bounded observation, no long quotes",
+                    "citation_anchor": "page/section/paragraph hint if available",
+                    "confidence": "high | medium | low | unknown",
+                }
+            ],
+            "limitations": ["short strings"],
+        },
+        "limits": {"max_observations": 5, "max_description_chars": 240},
+    }
+    content: list[dict[str, Any]] = []
+    if content_type == "application/pdf" and document_bytes is not None:
+        content.append({"document": {"format": "pdf", "name": _document_name(material_id, label), "source": {"bytes": document_bytes}}})
+    if content_type in {"text/plain", "text/markdown"} and text:
+        content.append({"text": f"Authorized material text for extraction:\n\n{text}"})
+    content.append({"text": "Return only valid JSON.\n\n" + json.dumps(prompt, ensure_ascii=True)})
+    return content
+
+
+def _document_name(material_id: str, label: str) -> str:
+    name = "".join(ch if ch.isalnum() else "-" for ch in (label or material_id).lower()).strip("-")
+    return (name or "material")[:80]
 
 
 def _anthropic_payload(
@@ -285,6 +394,37 @@ def _normalise_briefing(parsed: dict[str, Any], fallback: dict[str, Any]) -> dic
     return briefing
 
 
+def _normalise_material_extraction(parsed: dict[str, Any], *, label: str) -> dict[str, Any]:
+    observations = []
+    for index, item in enumerate(parsed.get("observations") if isinstance(parsed.get("observations"), list) else []):
+        if not isinstance(item, dict):
+            continue
+        description = _text(item.get("description"), "")
+        if not description:
+            continue
+        citation_anchor = _text(item.get("citation_anchor") or item.get("citationAnchor"), "document evidence")
+        observations.append(
+            {
+                "id": f"observation-{index + 1}",
+                "title": _text(item.get("title"), f"Material observation {index + 1}")[:120],
+                "category": _material_category(item.get("category")),
+                "description": description[:240],
+                "confidence": _confidence(item.get("confidence")),
+                "citationAnchor": citation_anchor[:120],
+            }
+        )
+        if len(observations) >= 5:
+            break
+    return {
+        "status": "extracted" if observations else "no_relevant_content",
+        "summary": _text(parsed.get("summary"), f"No RAMS-relevant observations were extracted from {label}.")[:300],
+        "confidence": _confidence(parsed.get("confidence")),
+        "limitations": _string_list(parsed.get("limitations"), ["Material extraction is bounded for demo review."])[:5],
+        "observations": observations,
+        "citations": [{"label": label, "locator": item["citationAnchor"]} for item in observations],
+    }
+
+
 def _mock_bedrock_subagent_plan(scenario: str) -> dict[str, Any]:
     plan = _default_subagent_plan()
     plan["rationale"] = "Mock Bedrock planner selected the standard bounded Harness subagent graph."
@@ -326,6 +466,53 @@ def _mock_bedrock_briefing(
     return briefing
 
 
+def _mock_material_extraction(
+    *,
+    label: str,
+    content_type: str,
+    text: str | None,
+    document_bytes: bytes | None,
+) -> dict[str, Any]:
+    sample = (text or "").lower()
+    if not sample and document_bytes:
+        sample = "pdf material supplied"
+    observations = []
+    if any(token in sample for token in ("access", "route", "public realm", "pdf material")):
+        observations.append(
+            {
+                "id": "observation-1",
+                "title": "Material access constraint",
+                "category": "access",
+                "description": "Retrieved material indicates access assumptions should be checked before site attendance.",
+                "confidence": "medium",
+                "citationAnchor": "page/section hint unavailable in mock",
+            }
+        )
+    if any(token in sample for token in ("service", "utility", "buried")):
+        observations.append(
+            {
+                "id": "observation-2",
+                "title": "Material utility check",
+                "category": "buried_services",
+                "description": "Retrieved material indicates utility or buried-service records need competent review.",
+                "confidence": "low",
+                "citationAnchor": "text section hint unavailable in mock",
+            }
+        )
+    return {
+        "status": "extracted" if observations else "no_relevant_content",
+        "summary": (
+            f"Mock Bedrock extraction reviewed a retrieved {content_type} material for bounded RAMS evidence."
+            if observations
+            else f"Mock Bedrock extraction found no RAMS-relevant content in {label}."
+        ),
+        "confidence": "medium" if observations else "low",
+        "limitations": ["Mock extraction for local verification; use live Bedrock only with authorized public-safe material."],
+        "observations": observations[:5],
+        "citations": [{"label": label, "locator": item["citationAnchor"]} for item in observations[:5]],
+    }
+
+
 def _metadata(
     config: RuntimeConfig,
     started: float,
@@ -333,13 +520,15 @@ def _metadata(
     *,
     phase: str | None = None,
     model_call_count: int = 1,
+    model_id: str | None = None,
+    max_tokens: int | None = None,
 ) -> dict[str, Any]:
     return {
         "mode": mode,
         "phase": phase,
-        "modelId": config.bedrock_model_id,
+        "modelId": model_id or config.bedrock_model_id,
         "awsRegion": config.aws_region,
-        "maxTokens": config.bedrock_max_tokens,
+        "maxTokens": max_tokens or config.bedrock_max_tokens,
         "maxModelCalls": config.bedrock_max_model_calls,
         "temperature": config.bedrock_temperature,
         "modelCallCount": model_call_count,
@@ -358,6 +547,23 @@ def _list(value: Any, fallback: list[str], limit: int) -> list[str]:
     return items[:limit] if items else fallback[:limit]
 
 
+def _material_category(value: Any) -> str:
+    category = str(value or "other").strip().lower()
+    return category if category in {"access", "buried_services", "planning", "environment", "hazard", "other"} else "other"
+
+
+def _confidence(value: Any) -> str:
+    confidence = str(value or "unknown").strip().lower()
+    return confidence if confidence in {"high", "medium", "low", "unknown"} else "unknown"
+
+
+def _string_list(value: Any, fallback: list[str]) -> list[str]:
+    if not isinstance(value, list):
+        return fallback
+    items = [str(item).strip()[:180] for item in value if str(item).strip()]
+    return items or fallback
+
+
 def _subagent_list(value: Any, fallback: list[str]) -> list[str]:
     allowed = set(_all_required_subagents())
     if not isinstance(value, list):
@@ -371,11 +577,11 @@ def _subagent_list(value: Any, fallback: list[str]) -> list[str]:
 
 
 def _ensure_required_subagents(plan: dict[str, Any]) -> dict[str, Any]:
-    initial = _subagent_list(plan.get("initial_parallel_groups"), ["geospatial_subagent", "planning_subagent"])
+    initial = _subagent_list(plan.get("initial_parallel_groups"), ["geospatial_subagent", "planning_subagent", "material_subagent"])
     sequential = _subagent_list(plan.get("sequential_groups"), ["hazard_subagent", "open_web_subagent", "review_guardrail"])
     report = _subagent_list(plan.get("report_parallel_groups"), ["annotation_subagent", "briefing_subagent"])
 
-    for group in ["geospatial_subagent", "planning_subagent"]:
+    for group in ["geospatial_subagent", "planning_subagent", "material_subagent"]:
         if group not in initial:
             initial.append(group)
     if "hazard_subagent" not in sequential:
@@ -398,13 +604,14 @@ def _ensure_required_subagents(plan: dict[str, Any]) -> dict[str, Any]:
 def _default_subagent_plan() -> dict[str, Any]:
     return {
         "rationale": "Use the standard 3D-RAMS bounded Harness workflow for a complete review pack.",
-        "initial_parallel_groups": ["geospatial_subagent", "planning_subagent"],
+        "initial_parallel_groups": ["geospatial_subagent", "planning_subagent", "material_subagent"],
         "sequential_groups": ["hazard_subagent", "open_web_subagent", "review_guardrail"],
         "report_parallel_groups": ["annotation_subagent", "briefing_subagent"],
         "required_evidence": [
             "resolved location",
             "geospatial features",
             "planning context",
+            "authorized material references",
             "candidate hazards",
             "open-web public signals",
             "3D annotations",
@@ -419,6 +626,7 @@ def _all_required_subagents() -> list[str]:
     return [
         "geospatial_subagent",
         "planning_subagent",
+        "material_subagent",
         "hazard_subagent",
         "open_web_subagent",
         "annotation_subagent",

@@ -1,0 +1,67 @@
+{
+  "name": "rams_material_harness",
+  "model": {
+    "provider": "bedrock",
+    "modelId": "amazon.nova-lite-v1:0",
+    "apiFormat": "converse_stream"
+  },
+  "systemPrompt": "You are the 3D-RAMS ASI-owned material specialist Harness. Validate authorized ASI/ASI:ONE material references for the confirmed case or session, retrieve/extract only through the approved material reference contract, and return bounded evidence summaries, citations, skipped reasons, and trace metadata. Do not create a 3D-RAMS upload flow or treat public naked URLs as a product contract. Keep output UI-safe and log-safe; never include raw private material content, signed URLs, access tokens, credentials, hidden reasoning, runtime ARNs, or private client data. Return exactly one JSON object with schemaVersion 3d-rams.harness-output.v1. Put the safe ingestion payload under data.materialIngestion. Include subagent, status, summary, evidence, findings, trace, references, warnings, errors, and metadata.",
+  "tools": [
+    {
+      "type": "inline_function",
+      "name": "ingest_material_references",
+      "config": {
+        "inlineFunction": {
+          "description": "Validate ASI/ASI:ONE-owned material references and return safe evidence summaries, citations, skipped reasons, and trace metadata.",
+          "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "ingest_material_references input",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "materials": {
+                "type": "array",
+                "description": "ASI/ASI:ONE-owned material references or explicit local fixture/mock references.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "default": []
+              },
+              "caseId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Confirmed case correlation id used to validate material case binding."
+              },
+              "upstream": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Safe upstream ASI/ASI:ONE caller metadata. Raw identity tokens must not be included."
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "skills": [],
+  "allowedTools": [
+    "ingest_material_references"
+  ],
+  "memory": {
+    "mode": "disabled"
+  },
+  "maxIterations": 4,
+  "maxTokens": 6000,
+  "timeoutSeconds": 180,
+  "truncation": {
+    "strategy": "summarization"
+  },
+  "environmentVariables": {
+    "RUNTIME_DATA_MODE": "fixture_first"
+  }
+}

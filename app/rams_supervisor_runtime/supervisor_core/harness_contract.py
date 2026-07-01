@@ -14,6 +14,7 @@ HARNESS_TRACE_STATUSES = {"ok", "warning", "fallback", "blocked", "disabled"}
 DOMAIN_DATA_KEYS = {
     "geospatial_subagent": ["location", "features", "scene"],
     "planning_subagent": ["planningText"],
+    "material_subagent": ["materialIngestion"],
     "hazard_subagent": ["hazards"],
     "open_web_subagent": ["openWeb"],
     "annotation_subagent": ["annotations"],

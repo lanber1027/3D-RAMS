@@ -120,7 +120,7 @@ class AgentCoreInvocationTests(unittest.TestCase):
         self.assertFalse(report["runtime"]["bedrockRequested"])
         self.assertFalse(report["runtime"]["bedrockEnabled"])
         self.assertFalse(report["runtime"]["bedrockUsed"])
-        self.assertEqual(report["llmPlan"]["initialParallelGroups"], ["geospatial_subagent", "planning_subagent"])
+        self.assertEqual(report["llmPlan"]["initialParallelGroups"], ["geospatial_subagent", "planning_subagent", "material_subagent"])
         self.assertEqual(report["fallback"]["status"], "used")
         self.assertEqual(run["runtime"]["fixturePack"], "public-lambeth-thames")
         self.assertFalse(run["runtime"]["liveApiCalls"])

@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import sys
@@ -14,6 +15,7 @@ for path in (TOOLS_ROOT, APP_ROOT):
 
 from rams_agent_tools import fixtures as fixture_module  # noqa: E402
 from rams_agent_tools.config import RuntimeConfig  # noqa: E402
+from rams_agent_tools.tools.materials import ingest_material_references  # noqa: E402
 from supervisor_core.agent import run_site_briefing  # noqa: E402
 from supervisor_core.harness_contract import HARNESS_OUTPUT_SCHEMA_VERSION, validate_harness_output  # noqa: E402
 from supervisor_core.subagent_invoker import AgentCoreHarnessInvoker  # noqa: E402
@@ -35,6 +37,33 @@ def authorized_material(case_id: str = "case_material_test_001") -> dict:
             "token": "DUMMY_MATERIAL_ACCESS_MARKER_SHOULD_NOT_LEAK",
         },
         "rawContent": "DUMMY RAW MATERIAL CONTENT SHOULD NOT LEAK",
+    }
+
+
+def retrieved_text_material(case_id: str = "case_material_extraction_001") -> dict:
+    return {
+        "materialId": "retrieved_text_access_note",
+        "sourceSystem": "asio",
+        "type": "text/plain",
+        "label": "Retrieved access note",
+        "caseId": case_id,
+        "sizeBytes": 220,
+        "access": {"mode": "asio_authorized_reference", "expiresAt": "2099-01-01T00:00:00Z"},
+        "rawContent": "Access route uses a public realm interface. Buried services records need competent review.",
+    }
+
+
+def retrieved_pdf_material(case_id: str = "case_material_extraction_002") -> dict:
+    pdf_bytes = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF"
+    return {
+        "materialId": "retrieved_pdf_access_plan",
+        "sourceSystem": "asio",
+        "type": "application/pdf",
+        "label": "Retrieved PDF access plan",
+        "caseId": case_id,
+        "sizeBytes": len(pdf_bytes),
+        "access": {"mode": "asio_authorized_reference", "expiresAt": "2099-01-01T00:00:00Z"},
+        "contentBytesBase64": base64.b64encode(pdf_bytes).decode("ascii"),
     }
 
 
@@ -77,7 +106,10 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertEqual(result["runtime"]["plannerMode"], "deterministic")
         self.assertEqual(result["runtime"]["activeAgentMode"], "deterministic-planner")
         self.assertEqual(result["runtime"]["modelCallCount"], 0)
-        self.assertEqual(result["llmPlan"]["initialParallelGroups"], ["geospatial_subagent", "planning_subagent"])
+        self.assertEqual(
+            result["llmPlan"]["initialParallelGroups"],
+            ["geospatial_subagent", "planning_subagent", "material_subagent"],
+        )
         self.assertEqual(result["llmPlan"]["reportParallelGroups"], ["annotation_subagent", "briefing_subagent"])
         self.assertEqual(result["reasoning"]["mode"], "deterministic")
         self.assertIn("reportFit", result["reasoning"])
@@ -224,6 +256,110 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertNotIn("DUMMY_RETRIEVAL_URL_SHOULD_NOT_LEAK", serialized)
         self.assertNotIn("retrievalUrl", serialized)
         self.assertNotIn("DUMMY RAW MATERIAL CONTENT SHOULD NOT LEAK", serialized)
+
+    def test_retrieved_pdf_material_uses_nova_lite_mock_extraction_without_raw_leakage(self):
+        material = retrieved_pdf_material()
+        with EnvPatch(
+            ENABLE_BEDROCK="true",
+            BEDROCK_MOCK_RESPONSE="true",
+            BEDROCK_SIMULATE_FAILURE=None,
+            MATERIAL_EXTRACTION_MODEL_ID="amazon.nova-lite-v1:0",
+        ):
+            result = run_site_briefing(
+                {
+                    "caseId": "case_material_extraction_002",
+                    "fixturePack": "public-lambeth-thames",
+                    "useBedrock": True,
+                    "materials": [material],
+                }
+            )
+
+        ingestion = result["materialIngestion"]
+        self.assertEqual(ingestion["accepted"], 1)
+        extraction = ingestion["extractions"][0]
+        self.assertEqual(extraction["status"], "extracted")
+        self.assertEqual(extraction["model"]["modelId"], "amazon.nova-lite-v1:0")
+        self.assertTrue(extraction["observations"])
+        self.assertFalse(extraction["rawContentStored"])
+
+        material_evidence = {item["id"]: item for item in result["evidence"]}["ev-material-retrieved-pdf-access-plan"]
+        self.assertEqual(material_evidence["status"], "extracted")
+        self.assertEqual(
+            material_evidence["extraction"]["limitations"][0],
+            "Mock extraction for local verification; use live Bedrock only with authorized public-safe material.",
+        )
+
+        serialized = json.dumps(result)
+        self.assertNotIn(material["contentBytesBase64"], serialized)
+        self.assertNotIn("%PDF-1.4", serialized)
+
+    def test_retrieved_text_material_uses_bedrock_mock_extraction_without_raw_leakage(self):
+        material = retrieved_text_material()
+        with EnvPatch(
+            ENABLE_BEDROCK="true",
+            BEDROCK_MOCK_RESPONSE="true",
+            BEDROCK_SIMULATE_FAILURE=None,
+            MATERIAL_EXTRACTION_MODEL_ID="amazon.nova-lite-v1:0",
+        ):
+            result = run_site_briefing(
+                {
+                    "caseId": "case_material_extraction_001",
+                    "fixturePack": "public-lambeth-thames",
+                    "useBedrock": True,
+                    "materials": [material],
+                }
+            )
+
+        ingestion = result["materialIngestion"]
+        self.assertEqual(ingestion["accepted"], 1)
+        self.assertEqual(ingestion["extractions"][0]["status"], "extracted")
+        self.assertEqual(ingestion["extractions"][0]["observations"][0]["citationAnchor"], "page/section hint unavailable in mock")
+        hazard_ids = {item["id"] for item in result["hazards"]}
+        self.assertIn("material-retrieved-text-access-note-observation-1", hazard_ids)
+
+        serialized = json.dumps(result)
+        self.assertNotIn("Access route uses a public realm interface", serialized)
+        self.assertNotIn('"rawContent":', serialized)
+
+    def test_retrieved_material_reports_model_not_configured_and_extraction_failed(self):
+        with EnvPatch(ENABLE_BEDROCK=None, BEDROCK_MOCK_RESPONSE=None, BEDROCK_SIMULATE_FAILURE=None):
+            disabled = ingest_material_references(
+                [retrieved_text_material()],
+                case_id="case_material_extraction_001",
+                config=RuntimeConfig.from_env(request_bedrock=False),
+            )
+        self.assertEqual(disabled["accepted"], 0)
+        self.assertEqual(disabled["skipped"][0]["reason"], "model_not_configured")
+
+        skipped = ingest_material_references(
+            [{key: value for key, value in retrieved_text_material().items() if key != "rawContent"}],
+            case_id="case_material_extraction_001",
+            config=RuntimeConfig.from_env(request_bedrock=False),
+        )
+        self.assertEqual(skipped["skipped"][0]["reason"], "retrieval_not_configured")
+
+        unsupported = ingest_material_references(
+            [
+                {
+                    **retrieved_text_material(),
+                    "materialId": "retrieved_image_photo",
+                    "type": "image/png",
+                    "label": "Retrieved image photo",
+                }
+            ],
+            case_id="case_material_extraction_001",
+            config=RuntimeConfig.from_env(request_bedrock=False),
+        )
+        self.assertEqual(unsupported["skipped"][0]["reason"], "unsupported_format")
+
+        with EnvPatch(ENABLE_BEDROCK="true", BEDROCK_SIMULATE_FAILURE="true", BEDROCK_MOCK_RESPONSE=None):
+            failed = ingest_material_references(
+                [retrieved_text_material()],
+                case_id="case_material_extraction_001",
+                config=RuntimeConfig.from_env(request_bedrock=True),
+            )
+        self.assertEqual(failed["accepted"], 0)
+        self.assertEqual(failed["skipped"][0]["reason"], "extraction_failed")
 
     def test_denied_expired_and_oversized_materials_are_skipped_without_secret_leakage(self):
         result = run_site_briefing(
@@ -394,11 +530,15 @@ class SiteBriefingAgentTests(unittest.TestCase):
 
         self.assertEqual(
             dispatch_steps["dispatch_parallel_tool_groups"]["output"]["groups"],
-            ["geospatial_subagent", "planning_subagent"],
+            ["geospatial_subagent", "planning_subagent", "material_subagent"],
         )
         self.assertEqual(
             dispatch_steps["dispatch_parallel_tool_groups"]["output"]["harnesses"]["geospatial_subagent"],
             "rams_geospatial_harness",
+        )
+        self.assertEqual(
+            dispatch_steps["dispatch_parallel_tool_groups"]["output"]["harnesses"]["material_subagent"],
+            "rams_material_harness",
         )
         self.assertEqual(
             dispatch_steps["dispatch_parallel_report_groups"]["output"]["groups"],
@@ -420,12 +560,13 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertEqual(result["runtime"]["harnessOutputSchemaVersion"], HARNESS_OUTPUT_SCHEMA_VERSION)
         self.assertTrue(result["runtime"]["harnessContract"]["contractCompliant"])
         self.assertEqual(result["runtime"]["harnessContract"]["fallbackCount"], 0)
-        self.assertEqual(len(result["subagentOutputs"]), 6)
+        self.assertEqual(len(result["subagentOutputs"]), 7)
         self.assertEqual(
             result["runtime"]["harnessContract"]["observedSubagents"],
             [
                 "geospatial_subagent",
                 "planning_subagent",
+                "material_subagent",
                 "hazard_subagent",
                 "open_web_subagent",
                 "annotation_subagent",

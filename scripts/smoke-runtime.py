@@ -193,8 +193,8 @@ def _validate_agent_response(result: dict) -> None:
     if contract.get("contractCompliant") is not True:
         raise AssertionError(f"Harness output contract fallback was used: {contract.get('issues')}")
     subagent_outputs = result.get("subagentOutputs") or []
-    if len(subagent_outputs) < 5:
-        raise AssertionError(f"expected five Harness subagent outputs; saw {len(subagent_outputs)}")
+    if len(subagent_outputs) < 7:
+        raise AssertionError(f"expected seven Harness subagent outputs; saw {len(subagent_outputs)}")
     for output in subagent_outputs:
         if output.get("schemaVersion") != HARNESS_OUTPUT_SCHEMA_VERSION:
             raise AssertionError(f"non-compliant Harness output from {output.get('subagent')}")

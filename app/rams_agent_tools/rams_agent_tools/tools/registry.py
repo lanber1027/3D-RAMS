@@ -11,10 +11,15 @@ SUPERVISOR_HARNESS_SUBAGENTS = {
         "phase": "initial_parallel_research",
         "dependsOn": [],
     },
+    "material_subagent": {
+        "harness": "rams_material_harness",
+        "phase": "initial_parallel_research",
+        "dependsOn": [],
+    },
     "hazard_subagent": {
         "harness": "rams_hazard_harness",
         "phase": "evidence_synthesis",
-        "dependsOn": ["geospatial_subagent", "planning_subagent"],
+        "dependsOn": ["geospatial_subagent", "planning_subagent", "material_subagent"],
     },
     "open_web_subagent": {
         "harness": "rams_open_web_harness",
@@ -53,6 +58,9 @@ SUPERVISOR_TOOL_GROUPS = {
     ],
     "hazard_subagent": [
         "extract_hazard_notes",
+    ],
+    "material_subagent": [
+        "ingest_material_references",
     ],
     "material_ingestion": [
         "ingest_material_references",

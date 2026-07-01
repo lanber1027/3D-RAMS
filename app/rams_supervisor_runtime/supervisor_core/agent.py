@@ -10,7 +10,6 @@ from rams_agent_tools.fixtures import load_fixture_pack
 from rams_agent_tools.tools import (
     architecture_snapshot,
     harness_for_group,
-    ingest_material_references,
     normalize_request,
     safety_gate,
     source_register,
@@ -74,38 +73,42 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
                 "harnesses": {
                     "geospatial_subagent": harness_for_group("geospatial_subagent"),
                     "planning_subagent": harness_for_group("planning_subagent"),
+                    "material_subagent": harness_for_group("material_subagent"),
                 },
                 "plannerMode": planner_result["activeAgentMode"],
                 "caseId": case_id,
             },
         )
     )
-    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="rams-initial-tools") as executor:
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="rams-initial-tools") as executor:
         geospatial_future = executor.submit(subagents.invoke_geospatial, request, fixture_pack=fixture_pack)
         planning_future = executor.submit(subagents.invoke_planning, request, fixture_pack=fixture_pack)
+        material_future = executor.submit(
+            subagents.invoke_material,
+            request,
+            case_id=case_id,
+            upstream_context=upstream_context if isinstance(upstream_context, dict) else None,
+        )
 
         geospatial_result = geospatial_future.result()
         planning_result = planning_future.result()
+        material_subagent_result = material_future.result()
 
-    subagent_outputs.extend([geospatial_result, planning_result])
+    subagent_outputs.extend([geospatial_result, planning_result, material_subagent_result])
     geospatial_data = harness_data(geospatial_result)
     planning_data = harness_data(planning_result)
+    material_data = harness_data(material_subagent_result)
     location = geospatial_data["location"]
     features = geospatial_data["features"]
     scene = geospatial_data["scene"]
     planning_text = planning_data["planningText"]
     trace.extend(_trace_steps(geospatial_result.get("trace"), "geospatial_subagent"))
     trace.extend(_trace_steps(planning_result.get("trace"), "planning_subagent"))
-
-    material_result = ingest_material_references(
-        request_summary.get("materials"),
-        case_id=case_id,
-        upstream_context=upstream_context,
-    )
-    trace.extend(_trace_steps(material_result.get("trace"), "material_ingestion"))
-    material_findings = _dict_list(material_result.get("findings"), "material_ingestion", "findings")
-    material_evidence = _dict_list(material_result.get("evidence"), "material_ingestion", "evidence")
-    material_sources = _dict_list(material_result.get("sources"), "material_ingestion", "sources")
+    trace.extend(_trace_steps(material_subagent_result.get("trace"), "material_subagent"))
+    material_result = _dict(material_data.get("materialIngestion"))
+    material_findings = _dict_list(material_subagent_result.get("findings"), "material_subagent", "findings")
+    material_evidence = _dict_list(material_subagent_result.get("evidence"), "material_subagent", "evidence")
+    material_sources = _dict_list(material_subagent_result.get("references"), "material_subagent", "references")
 
     sequential_groups = subagent_plan["sequentialGroups"]
     evidence_groups = [
@@ -186,7 +189,7 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
     briefing_data = harness_data(briefing_result)
     annotations = _dict_list(annotation_data.get("annotations"), "annotation_subagent", "annotations")
     briefing = _briefing_payload(briefing_data.get("briefing"))
-    _merge_material_briefing(briefing, material_result)
+    _merge_material_briefing(briefing, {**material_result, "findings": material_findings})
     evidence = _evidence_items(briefing_data.get("evidence")) + material_evidence
     bedrock_status = briefing_data["bedrockStatus"]
     bedrock_fallback_reason = briefing_data["bedrockFallbackReason"]
@@ -368,6 +371,10 @@ def _dict_list(value: Any, source: str, field: str) -> list[dict[str, Any]]:
     return []
 
 
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def _briefing_payload(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -420,6 +427,7 @@ def _material_public_result(material_result: dict[str, Any]) -> dict[str, Any]:
         "acceptedReferences",
         "skipped",
         "citations",
+        "extractions",
         "sourceIds",
         "evidenceIds",
     }
