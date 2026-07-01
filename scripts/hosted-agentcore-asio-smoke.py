@@ -43,9 +43,19 @@ def run_smoke(
     )
     entry_agent = _entry_agent(clarification)
     pending_status = entry_agent.get("status")
-    _assert(pending_status in {"clarification_required", "confirmation_required"}, "entry did not clarify or confirm")
+    _assert(
+        pending_status in {"clarification_required", "confirmation_required", "conversation_routed"},
+        "entry did not clarify, confirm, or route help",
+    )
     _assert(_output(clarification).get("run") is None, "clarification turn unexpectedly launched supervisor")
-    checks.append({"name": "entry_clarification_or_confirmation", "status": "ok", "entryStatus": pending_status})
+    checks.append(
+        {
+            "name": "entry_clarification_confirmation_or_help",
+            "status": "ok",
+            "entryStatus": pending_status,
+            "route": entry_agent.get("route"),
+        }
+    )
 
     launch = invoke_entry(_confirmed_launch_payload(case_id, conversation_id))
     output = _output(launch)

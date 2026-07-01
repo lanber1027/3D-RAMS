@@ -298,6 +298,8 @@ def _optional_text(value: Any) -> str | None:
 def _has_site_signal(message: str) -> bool:
     return bool(
         _coordinate_pair(message)
+        or _uk_postcode(message)
+        or _os_grid_ref(message)
         or re.search(
             r"\b(albert embankment|embankment|street|road|lane|coordinate|near|site|lambeth|postcode|address)\b",
             message,
@@ -362,6 +364,12 @@ def _location_text(message: str) -> str:
     coordinate = _coordinate_pair(message)
     if coordinate:
         return f"{coordinate[0]:.6f}, {coordinate[1]:.6f}"
+    postcode = _uk_postcode(message)
+    if postcode:
+        return postcode
+    os_grid = _os_grid_ref(message)
+    if os_grid:
+        return os_grid
     return message[:160] or "User supplied site"
 
 
@@ -414,6 +422,16 @@ def _coordinate_pair(message: str) -> tuple[float, float] | None:
     if -90 <= lat <= 90 and -180 <= lng <= 180:
         return lat, lng
     return None
+
+
+def _uk_postcode(message: str) -> str | None:
+    match = re.search(r"\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b", message, re.I)
+    return match.group(1).upper() if match else None
+
+
+def _os_grid_ref(message: str) -> str | None:
+    match = re.search(r"\b([A-Z]{2}\s*\d{3,5}\s*\d{3,5})\b", message, re.I)
+    return match.group(1).upper() if match else None
 
 
 def _fallback_reason(exc: Exception) -> str:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 from typing import Any
@@ -62,6 +63,7 @@ AgentCore integration is working.
 tools = []
 _INLINE_FUNCTION_NAMES = set()
 _PENDING_INTAKES: dict[str, dict[str, Any]] = {}
+_CONVERSATION_STATE: dict[str, dict[str, Any]] = {}
 
 
 @tool
@@ -122,7 +124,16 @@ def handle_invocation(
             raise AdapterValidationError("Entry payload must include message, prompt, messages, or intake.")
 
         turn = build_entry_turn(payload)
-        if payload.get("confirmedByUser") is True and "intake" not in payload and turn["conversationId"] in _PENDING_INTAKES:
+        conversation_id = turn["conversationId"]
+        conversation_route = None if isinstance(payload.get("intake"), dict) else _conversation_route(turn["message"], conversation_id)
+        if conversation_route == "confirm_by_chat" and conversation_id in _PENDING_INTAKES and not _awaiting_location_correction(conversation_id):
+            payload = {**payload, "confirmedByUser": True, "intake": _PENDING_INTAKES[conversation_id]}
+        elif conversation_route == "location_correction":
+            _PENDING_INTAKES.pop(conversation_id, None)
+        elif conversation_route:
+            return _conversation_route_output(payload, turn, conversation_route)
+
+        if payload.get("confirmedByUser") is True and "intake" not in payload and conversation_id in _PENDING_INTAKES and not _awaiting_location_correction(conversation_id):
             payload = {**payload, "intake": _PENDING_INTAKES[turn["conversationId"]]}
         selected_model_json = select_model_json(payload, model_json)
         intake_started = time.perf_counter()
@@ -138,12 +149,12 @@ def handle_invocation(
             intake_result=intake_result,
             latency_ms=intake_latency_ms,
         )
-        conversation_id = turn["conversationId"]
         user_id = str(payload.get("userId") or "3d-rams-entry-agent")
 
         if intake_result["status"] != "launch_ready":
             if intake_result["status"] == "confirmation_required" and isinstance(intake_result.get("intake"), dict):
                 _PENDING_INTAKES[conversation_id] = intake_result["intake"]
+            _remember_intake_state(conversation_id, conversation_route or "intake", intake_result)
             return {
                 "output": {
                     "caseId": intake_result.get("caseId"),
@@ -157,6 +168,8 @@ def handle_invocation(
                         "mode": _entry_agent_mode(intake_result),
                         "adapterVersion": "asi-one-entry-agent-v2",
                         "conversationId": conversation_id,
+                        "route": conversation_route or "intake",
+                        "boundedContext": _bounded_conversation_state(conversation_id),
                         "runtimeObservability": entry_observability,
                         **intake_result,
                     },
@@ -180,6 +193,7 @@ def handle_invocation(
         delivery = build_delivery_payload(agentcore_response, entry_payload=confirmed_payload)
         assistant_message = _delivery_assistant_message(delivery)
         output = agentcore_response.get("output") if isinstance(agentcore_response.get("output"), dict) else {}
+        _remember_supervisor_state(conversation_id, conversation_route or "intake_launch", output, delivery)
         return {
             "output": {
                 "caseId": output.get("caseId") or delivery.get("caseId") or confirmed_payload["caseId"],
@@ -194,9 +208,11 @@ def handle_invocation(
                     "mode": "cloud-supervisor-handoff",
                     "adapterVersion": "asi-one-entry-agent-v2",
                     "conversationId": conversation_id,
+                    "route": conversation_route or "intake_launch",
                     "caseId": output.get("caseId") or delivery.get("caseId") or confirmed_payload["caseId"],
                     "status": "delivered",
                     "assistantMessage": assistant_message,
+                    "boundedContext": _bounded_conversation_state(conversation_id),
                     "intakeMode": intake_result.get("intakeMode"),
                     "fallbackReason": intake_result.get("fallbackReason"),
                     "runtimeObservability": entry_observability,
@@ -206,6 +222,268 @@ def handle_invocation(
         }
     except (AdapterValidationError, IntakeValidationError) as exc:
         return _blocked_entry_output(payload, str(exc))
+
+
+def _conversation_route(message: str, conversation_id: str) -> str | None:
+    text = " ".join(str(message or "").strip().lower().split())
+    if not text:
+        return None
+    has_site_evidence = _has_corrected_site_evidence(text)
+    if _awaiting_location_correction(conversation_id) and has_site_evidence:
+        return "location_correction"
+    if _looks_like_start_over(text) and not has_site_evidence:
+        return "start_over_without_site"
+    if _looks_like_location_rejection(text) and not has_site_evidence:
+        return "reject_location"
+    if _looks_like_chat_confirmation(text):
+        return "confirm_by_chat"
+    if _looks_like_status(text):
+        return "status"
+    if _looks_like_greeting(text) and not has_site_evidence:
+        return "greeting"
+    if _looks_like_help(text) and not has_site_evidence:
+        return "help"
+    if _looks_like_follow_up(text) and not has_site_evidence:
+        return "follow_up"
+    return None
+
+
+def _conversation_route_output(payload: dict[str, Any], turn: dict[str, Any], route: str) -> dict[str, Any]:
+    conversation_id = turn["conversationId"]
+    message = turn.get("message") or ""
+    if route == "start_over_without_site":
+        _PENDING_INTAKES.pop(conversation_id, None)
+        _CONVERSATION_STATE.pop(conversation_id, None)
+    if route == "reject_location":
+        _PENDING_INTAKES.pop(conversation_id, None)
+
+    assistant_message, pending_action = _conversation_message(conversation_id, route)
+    state = _CONVERSATION_STATE.setdefault(conversation_id, {})
+    state.update(
+        {
+            "pendingAction": pending_action,
+            "recentRoute": route,
+            "latestSafeUserSummary": _safe_summary(message),
+            "latestSafeAssistantSummary": _safe_summary(assistant_message),
+        }
+    )
+    bounded_context = _bounded_conversation_state(conversation_id)
+    return {
+        "output": {
+            "caseId": state.get("activeCaseId"),
+            "delivery": None,
+            "run": None,
+            "structuredReport": None,
+            "reportStatus": "no_active_context" if route == "status" and not _has_active_context(state) else "entry_pending",
+            "workflowMode": "entry_conversation",
+            "assistantMessage": assistant_message,
+            "entryAgent": {
+                "mode": "guarded-conversation-router",
+                "adapterVersion": "asi-one-entry-agent-v2",
+                "conversationId": conversation_id,
+                "route": route,
+                "status": "conversation_routed",
+                "pendingAction": pending_action,
+                "assistantMessage": assistant_message,
+                "boundedContext": bounded_context,
+                "runtimeObservability": {
+                    "schemaVersion": "3d-rams.runtime-observability.v1",
+                    "modelPath": "entry-conversation-router",
+                    "modelCallCount": 0,
+                    "bedrockRequested": False,
+                    "bedrockEnabled": False,
+                    "bedrockUsed": False,
+                    "activeAgentMode": "guarded-conversation-router",
+                },
+            },
+        }
+    }
+
+
+def _conversation_message(conversation_id: str, route: str) -> tuple[str, str | None]:
+    state = _CONVERSATION_STATE.get(conversation_id, {})
+    pending = state.get("pendingAction")
+    if route == "greeting":
+        return (
+            "Hi. Send the site, area or radius, and planned visit purpose, and I will prepare the intake for confirmation.",
+            pending or "awaiting_intake_details",
+        )
+    if route == "help":
+        return (
+            "I can start a pre-visit 3D-RAMS review once you provide a site, review area, and visit purpose. I will ask for confirmation before launching the supervisor.",
+            pending or "awaiting_intake_details",
+        )
+    if route == "status":
+        if conversation_id in _PENDING_INTAKES and pending != "awaiting_location_correction":
+            return (
+                f"An intake is waiting for confirmation: {_safe_summary(_intake_summary(_PENDING_INTAKES[conversation_id]))}",
+                "awaiting_confirmation",
+            )
+        if pending == "awaiting_location_correction":
+            return (
+                "I am waiting for corrected site evidence before launching anything. Send a postcode, coordinates, OS grid reference, or a clear site name with usable detail.",
+                "awaiting_location_correction",
+            )
+        if _has_active_context(state):
+            return (
+                f"Latest supervisor context: case {state.get('activeCaseId')} is {state.get('activeRunStatus') or 'available'}.",
+                None,
+            )
+        return ("I do not have an active intake or supervisor run in this conversation yet.", None)
+    if route == "follow_up":
+        if pending == "awaiting_location_correction":
+            return (
+                "I need corrected site evidence before I can continue: a postcode, coordinates, OS grid reference, or a clear site name with usable detail.",
+                "awaiting_location_correction",
+            )
+        if conversation_id in _PENDING_INTAKES:
+            return (
+                f"I have a draft intake waiting for your confirmation: {_safe_summary(_intake_summary(_PENDING_INTAKES[conversation_id]))}",
+                "awaiting_confirmation",
+            )
+        return (
+            "I need enough public-safe site context to start: site evidence, review area or radius, and the planned visit purpose.",
+            "awaiting_intake_details",
+        )
+    if route == "confirm_by_chat":
+        if pending == "awaiting_location_correction":
+            return (
+                "I will not launch the previous intake after a location rejection. Send corrected site evidence first.",
+                "awaiting_location_correction",
+            )
+        return ("There is no intake waiting for confirmation in this conversation yet.", "awaiting_intake_details")
+    if route == "reject_location":
+        return (
+            "Understood. I will not launch that location. Send corrected site evidence, such as a postcode, coordinates, OS grid reference, or a clear site name with usable detail.",
+            "awaiting_location_correction",
+        )
+    return (
+        "Starting over. Send the site, area or radius, and planned visit purpose when you are ready.",
+        "awaiting_intake_details",
+    )
+
+
+def _remember_intake_state(conversation_id: str, route: str, intake_result: dict[str, Any]) -> None:
+    state = _CONVERSATION_STATE.setdefault(conversation_id, {})
+    pending_action = "awaiting_confirmation" if intake_result.get("status") == "confirmation_required" else "awaiting_intake_details"
+    state.update(
+        {
+            "pendingAction": pending_action,
+            "recentRoute": route,
+            "latestSafeAssistantSummary": _safe_summary(intake_result.get("assistantMessage")),
+        }
+    )
+    if isinstance(intake_result.get("intake"), dict):
+        state["publicSafeLocationSummary"] = _safe_summary(_location_summary(intake_result["intake"]))
+
+
+def _remember_supervisor_state(
+    conversation_id: str,
+    route: str,
+    output: dict[str, Any],
+    delivery: dict[str, Any],
+) -> None:
+    state = _CONVERSATION_STATE.setdefault(conversation_id, {})
+    state.update(
+        {
+            "pendingAction": None,
+            "recentRoute": route,
+            "activeCaseId": output.get("caseId") or delivery.get("caseId"),
+            "activeRunStatus": output.get("reportStatus") or delivery.get("status"),
+            "activeWorkflowMode": output.get("workflowMode") or delivery.get("workflowMode"),
+            "latestSafeAssistantSummary": _safe_summary(_delivery_assistant_message(delivery)),
+        }
+    )
+
+
+def _bounded_conversation_state(conversation_id: str) -> dict[str, Any]:
+    state = _CONVERSATION_STATE.get(conversation_id, {})
+    allowed = (
+        "pendingAction",
+        "recentRoute",
+        "latestSafeAssistantSummary",
+        "latestSafeUserSummary",
+        "activeCaseId",
+        "activeRunStatus",
+        "activeWorkflowMode",
+        "publicSafeLocationSummary",
+    )
+    return {key: state[key] for key in allowed if state.get(key)}
+
+
+def _awaiting_location_correction(conversation_id: str) -> bool:
+    return _CONVERSATION_STATE.get(conversation_id, {}).get("pendingAction") == "awaiting_location_correction"
+
+
+def _has_active_context(state: dict[str, Any]) -> bool:
+    return bool(state.get("activeCaseId") or state.get("activeRunStatus"))
+
+
+def _looks_like_chat_confirmation(text: str) -> bool:
+    return bool(
+        text in {"yes", "yes please", "confirm", "confirmed", "launch", "go", "go ahead"}
+        or re.search(r"^(please\s+)?(confirm|confirmed|proceed|go ahead|launch)\b", text)
+        or re.search(r"\b(confirm(ed)? and launch|please launch)\b", text)
+    )
+
+
+def _looks_like_status(text: str) -> bool:
+    return bool(re.search(r"\b(status|progress|where are we|what.*happening|active run|current run)\b", text))
+
+
+def _looks_like_greeting(text: str) -> bool:
+    return text in {"hi", "hello", "hey", "good morning", "good afternoon", "good evening"}
+
+
+def _looks_like_help(text: str) -> bool:
+    return bool(text in {"help", "help me"} or re.search(r"\b(how does this work|what can you do|can you help)\b", text))
+
+
+def _looks_like_follow_up(text: str) -> bool:
+    return bool(re.search(r"\b(what do you mean|explain|what next|what else|why|how so)\b", text))
+
+
+def _looks_like_location_rejection(text: str) -> bool:
+    return bool(
+        re.search(r"\b(wrong|incorrect|not right|not that|different)\s+(site|location|address|place)\b", text)
+        or re.search(r"\b(no|nah|nope),?\s+(wrong|incorrect|not that|different)\b", text)
+        or re.search(r"\bthat'?s\s+(wrong|incorrect|not the right)\b", text)
+    )
+
+
+def _looks_like_start_over(text: str) -> bool:
+    return bool(re.search(r"\b(start over|restart|reset|clear this|new intake)\b", text))
+
+
+def _has_corrected_site_evidence(text: str) -> bool:
+    return bool(
+        re.search(r"-?\d{1,2}(?:\.\d+)?\s*,\s*-?\d{1,3}(?:\.\d+)?", text)
+        or re.search(r"\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b", text, re.I)
+        or re.search(r"\b[A-Z]{2}\s*\d{3,5}\s*\d{3,5}\b", text, re.I)
+        or re.search(r"\b\d+\s+[a-z][a-z\s'-]{2,}\s+(street|road|lane|avenue|drive|way|place|embankment)\b", text)
+        or re.search(r"\b(near|at|use|site is|location is)\s+[a-z0-9][a-z0-9\s,'-]{5,}", text)
+    )
+
+
+def _safe_summary(value: Any, limit: int = 180) -> str:
+    text = " ".join(str(value or "").split())
+    text = re.sub(r"https?://\S+", "[redacted-url]", text, flags=re.I)
+    text = re.sub(
+        r"\b(access[-_\s]?code|identity[-_\s]?token|bearer[-_\s]?token|session[-_\s]?secret|signed[-_\s]?url|token)\b\s*[:=]?\s*\S+",
+        r"\1 [redacted]",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "[redacted-email]", text)
+    return text[:limit]
+
+
+def _intake_summary(intake: dict[str, Any]) -> str:
+    return f"{_location_summary(intake)}, {intake.get('areaScope', {}).get('meters')}m radius, {intake.get('userGoal') or 'pre-visit review'}"
+
+
+def _location_summary(intake: dict[str, Any]) -> str:
+    return str(intake.get("locationText") or intake.get("locationCandidate", {}).get("label") or "selected site")
 
 
 def _blocked_entry_output(payload: dict[str, Any], reason: str) -> dict[str, Any]:
