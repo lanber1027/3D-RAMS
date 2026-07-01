@@ -125,6 +125,60 @@ class AgentVerseAdapterTests(unittest.TestCase):
         self.assertNotIn("signedUrl", agent_input["materials"][0])
         self.assertNotIn("early feasibility walkover", agent_input["additionalRequest"])
 
+    def test_material_access_retrieval_artifacts_are_marked_not_exposed(self):
+        payload = confirmed_entry_payload()
+        payload["intake"]["materials"] = [
+            {
+                "materialId": "url-material",
+                "sourceSystem": "asio",
+                "type": "application/pdf",
+                "label": "URL material",
+                "summary": "Safe bounded summary.",
+                "caseId": "case_test_agentverse_001",
+                "sizeBytes": 4096,
+                "access": {
+                    "mode": "asio_authorized_reference",
+                    "expiresAt": "2099-01-01T00:00:00Z",
+                    "sessionId": "agentverse-session-id",
+                    "retrievalUrl": "https://materials.example.invalid/private.pdf?token=secret-token",
+                    "bearerToken": "secret-token",
+                },
+                "signedUrl": "https://example.invalid/signed-secret",
+                "rawContent": "private document text",
+            },
+            {
+                "materialId": "handle-material",
+                "sourceSystem": "asio",
+                "type": "text/plain",
+                "label": "API material",
+                "caseId": "case_test_agentverse_001",
+                "access": {
+                    "mode": "asio_authorized_reference",
+                    "apiHandle": "asi-material-handle-secret",
+                    "token": "another-secret-token",
+                },
+            },
+        ]
+
+        invocation = build_agentcore_invocation(payload)
+        materials = invocation["input"]["materials"]
+        serialized = json.dumps(invocation)
+
+        self.assertEqual(materials[0]["sizeBytes"], 4096)
+        self.assertEqual(materials[0]["access"]["sessionId"], "agentverse-session-id")
+        self.assertEqual(materials[0]["access"]["retrieval"], {"method": "retrieval_url", "provided": True})
+        self.assertEqual(materials[1]["access"]["retrieval"], {"method": "api_handle", "provided": True})
+        for secret in (
+            "retrievalUrl",
+            "apiHandle",
+            "secret-token",
+            "another-secret-token",
+            "signed-secret",
+            "private document text",
+            "asi-material-handle-secret",
+        ):
+            self.assertNotIn(secret, serialized)
+
     def test_maps_agentcore_response_to_entry_delivery_payload(self):
         entry_payload = confirmed_entry_payload()
         invocation = build_agentcore_invocation(entry_payload)

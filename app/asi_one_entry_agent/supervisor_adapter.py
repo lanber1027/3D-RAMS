@@ -203,6 +203,7 @@ def _safe_material_references(materials: list[Any], *, case_id: str) -> list[dic
         "label",
         "summary",
         "caseId",
+        "sizeBytes",
         "sourceIds",
         "evidenceIds",
     }
@@ -217,9 +218,21 @@ def _safe_material_references(materials: list[Any], *, case_id: str) -> list[dic
             "mode": access.get("mode") or "reference_only",
             "expiresAt": access.get("expiresAt"),
             "status": access.get("status") or "not_retrieved",
+            "sessionId": access.get("sessionId"),
         }
+        retrieval = _safe_material_retrieval_descriptor(access)
+        if retrieval:
+            material["access"]["retrieval"] = retrieval
         safe.append({key: value for key, value in material.items() if value not in (None, "", [])})
     return safe
+
+
+def _safe_material_retrieval_descriptor(access: dict[str, Any]) -> dict[str, Any]:
+    if access.get("retrievalUrl") or access.get("retrieval_url"):
+        return {"method": "retrieval_url", "provided": True}
+    if access.get("apiHandle") or access.get("api_handle"):
+        return {"method": "api_handle", "provided": True}
+    return {}
 
 
 def _identity_context(payload: dict[str, Any]) -> dict[str, Any]:
