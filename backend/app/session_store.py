@@ -305,7 +305,7 @@ def _write_dynamodb_session(session: dict[str, Any], config: RuntimeConfig) -> b
 def _to_dynamodb_item(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _to_dynamodb_item(item) for key, item in value.items()}
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [_to_dynamodb_item(item) for item in value]
     if isinstance(value, float):
         return Decimal(str(value))

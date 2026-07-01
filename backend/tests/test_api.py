@@ -597,6 +597,17 @@ class ApiContractTests(unittest.TestCase):
                     "longitude": -2.1013,
                     "source": "user-supplied-coordinate",
                 },
+                latestLocationResolution={
+                    "siteName": "Foxglove Farm Solar Site",
+                    "locationCandidates": [
+                        {
+                            "candidateId": "candidate-coordinate-54-9712-2-1013",
+                            "latitude": 54.9712,
+                            "longitude": -2.1013,
+                            "intent": {"coordinate": (54.9712, -2.1013)},
+                        }
+                    ],
+                },
             )
             self.assertEqual(session["storageMode"], "dynamodb")
             self.assertEqual(memory["confirmedLocation"]["latitude"], 54.9712)
@@ -605,15 +616,20 @@ class ApiContractTests(unittest.TestCase):
             self.assertIsInstance(saved_location["longitude"], Decimal)
             self.assertEqual(saved_location["latitude"], Decimal("54.9712"))
             self.assertEqual(saved_location["longitude"], Decimal("-2.1013"))
+            saved_candidate = captured["item"]["workingMemory"]["latestLocationResolution"]["locationCandidates"][0]
+            self.assertIsInstance(saved_candidate["intent"]["coordinate"], list)
+            self.assertEqual(saved_candidate["intent"]["coordinate"], [Decimal("54.9712"), Decimal("-2.1013")])
             session_store._SESSIONS.pop(session["sessionId"], None)
             cold_session = get_session(session["sessionId"], config=config)
             cold_location = cold_session["workingMemory"]["confirmedLocation"]
+            cold_candidate = cold_session["workingMemory"]["latestLocationResolution"]["locationCandidates"][0]
 
         self.assertEqual(captured["getItemCalls"], 1)
         self.assertIsInstance(cold_location["latitude"], float)
         self.assertIsInstance(cold_location["longitude"], float)
         self.assertEqual(cold_location["latitude"], 54.9712)
         self.assertEqual(cold_location["longitude"], -2.1013)
+        self.assertEqual(cold_candidate["intent"]["coordinate"], [54.9712, -2.1013])
 
     def test_upload_url_returns_local_mock_when_s3_is_unconfigured(self):
         with EnvPatch(APP_ACCESS_TOKEN_HASH=None, S3_UPLOAD_BUCKET=None):
