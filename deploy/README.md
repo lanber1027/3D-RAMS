@@ -62,10 +62,24 @@ The Amplify deployment script writes a root-relative ZIP archive so hosted paths
 
 ## Smoke Test
 
+Run the low-cost hosted memory regression first. It does not request Bedrock and checks the guarded conversation route that prevents a follow-up such as `What do you mean` from becoming a fake site request:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\smoke-hosted.ps1 -MemoryOnly
+```
+
+Equivalent Python fallback:
+
+```powershell
+python deploy\smoke-hosted.py --memory-only
+```
+
+Run the full hosted smoke only when you intend to spend the bounded Bedrock calls:
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File deploy\smoke-hosted.ps1 -IncludeUnsafe
 ```
 
-The smoke test uses the private local access-code handoff file and does not print the raw access code.
+The smoke test uses the private local access-code handoff file and does not print the raw access code. Success summaries redact live session/run ids by default. Use `-IncludeIds` or `--include-ids` only for private debugging, and do not paste that output into public issues or docs.
 
 Known limitation: setting Lambda reserved concurrency to `2` may fail in small AWS accounts if it would reduce unreserved account concurrency below AWS's required minimum. The script warns and continues; access-code gating, low tester volume, Bedrock model-call caps, token caps, and the AWS budget alert remain the MVP cost controls.

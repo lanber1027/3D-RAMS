@@ -143,6 +143,52 @@ High-level sequence:
 
 This repo includes deployment scripts used for the maintained demo, but they are not a universal installer. Review them before use and adapt names, regions, permissions, budget controls, and hosting choices to your AWS account.
 
+## Post-Deploy Smoke Checks
+
+After deploying, start with the no-Bedrock memory regression before running the full smoke.
+
+The smoke scripts need:
+
+- your API Gateway base URL;
+- a private local JSON file containing your own `accessCode`, for example `deploy/my-private-smoke.local.json`.
+
+Do not commit the private file.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\smoke-hosted.ps1 `
+  -ApiBaseUrl "https://your-api-id.execute-api.your-region.amazonaws.com" `
+  -PrivateFile "deploy\my-private-smoke.local.json" `
+  -MemoryOnly
+```
+
+or:
+
+```bash
+python deploy/smoke-hosted.py \
+  --api-base-url "https://your-api-id.execute-api.your-region.amazonaws.com" \
+  --private-file "deploy/my-private-smoke.local.json" \
+  --memory-only
+```
+
+This verifies:
+
+- health check succeeds;
+- wrong access code returns `401`;
+- a Greenacre location-confirmation run is created without model calls;
+- a follow-up such as `What do you mean` is answered from session memory;
+- the session still has one active run and a pending location-confirmation action.
+
+Run the full hosted smoke only when you are ready to use the configured Bedrock budget:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\smoke-hosted.ps1 `
+  -ApiBaseUrl "https://your-api-id.execute-api.your-region.amazonaws.com" `
+  -PrivateFile "deploy\my-private-smoke.local.json" `
+  -IncludeUnsafe
+```
+
+Smoke summaries redact live session/run ids by default. Use `-IncludeIds` or `--include-ids` only for private debugging, and do not paste that output into public issues or docs.
+
 ## Cost Controls
 
 Recommended MVP controls:
