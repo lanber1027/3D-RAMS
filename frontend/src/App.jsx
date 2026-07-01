@@ -455,6 +455,40 @@ function LocationConfirmationPanel({ resolution, onConfirm, onReject, onManual, 
   );
 }
 
+function locationNeededResolutionFromConversation(conversationState) {
+  if (!conversationState) return null;
+  const intent = conversationState.intent;
+  const locationStatus = conversationState.locationStatus;
+  if (intent !== "location_discovery" && !["vague", "needs_evidence"].includes(locationStatus)) {
+    return null;
+  }
+  const known = conversationState.knownDetails || {};
+  const placeHint = known.placeHint || "";
+  const areaHint = known.areaHint || "";
+  const siteName =
+    placeHint && areaHint
+      ? `${placeHint} near ${areaHint}`
+      : placeHint || areaHint || known.siteName || "the described location";
+  return {
+    siteName,
+    intent: {
+      placeHint: placeHint || null,
+      areaHint: areaHint || null,
+      activities: known.activity ? [known.activity] : [],
+      postcode: known.postcode || null,
+      coordinate: known.coordinate || null,
+    },
+    needsLocationConfirmation: false,
+    locationCandidates: [],
+    confirmedLocation: null,
+    nextStage: "provide_location_detail",
+    resolverMode: "conversation-location-needed",
+    minimumEvidenceMet: false,
+    message: "No reliable candidate is available yet. Ask for postcode, latitude/longitude, a specific site name, nearest road, or public evidence.",
+    provisionalRisks: [],
+  };
+}
+
 function RunStatusBar({ runStatus, onResume, canResume }) {
   const status = runStatus?.status || "ready";
   const latestStep = runStatus?.currentStep || "not started";
@@ -873,6 +907,7 @@ function App() {
         applyRunStatus(result.run);
         await refreshSessionState(session.sessionId);
       } else {
+        const locationNeededResolution = locationNeededResolutionFromConversation(result.conversationState);
         const nextConversationDebug = {
           route: result.route,
           conversationState: result.conversationState,
@@ -900,11 +935,29 @@ function App() {
           assistantMessage: result.assistantMessage || "I answered from the current session context.",
           uiState: {
             ...(current?.uiState || {}),
+            ...(locationNeededResolution
+              ? {
+                  location: null,
+                  scene: null,
+                  annotations: [],
+                  mapFeatures: [],
+                  liveFeatureStatus: null,
+                  hazards: [],
+                  evidence: [],
+                  sources: [],
+                  briefing: null,
+                  architecture: null,
+                }
+              : {}),
             safety: { allowed: true, level: "conversation", message: "No site-review tools ran for this chat turn." },
             trace: result.trace || [],
-            reviewMode: "conversation only",
+            locationResolution: locationNeededResolution || current?.uiState?.locationResolution || null,
+            reviewMode: locationNeededResolution ? "location needed" : "conversation only",
           },
           trace: result.trace || [],
+          evidence: locationNeededResolution ? [] : current?.evidence,
+          scene: locationNeededResolution ? null : current?.scene,
+          annotations: locationNeededResolution ? [] : current?.annotations,
           modelCalls: result.modelCalls || [],
           runtime: {
             ...(current?.runtime || {}),
