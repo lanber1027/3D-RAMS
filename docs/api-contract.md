@@ -68,7 +68,7 @@ Known `input` fields:
 | `simulateMapFailure` | boolean | Defaults to `false`. Set `true` to force the geospatial fallback path. |
 | `useBedrock` | boolean | Defaults to `true`. Bedrock is used only when runtime environment settings enable it. |
 | `additionalRequest` | string | Optional user instruction. Unsafe RAMS/work-approval claims are blocked. |
-| `materials` | array | Optional ASI/ASI:ONE-owned material references or explicit local fixture/mock references. Only bounded metadata is accepted: id, source system, type, label, summary, case id, source/evidence ids, and access mode/expiry/status. Raw files, raw material content, tokens, signed URLs, and credentials are not persisted or returned. |
+| `materials` | array | Optional ASI/ASI:ONE-owned material references or explicit local fixture/mock references. Only bounded metadata is accepted: id, source system, type, label, summary, case id, size, source/evidence ids, and access mode/expiry/status/session plus a safe retrieval marker for URL or API-handle access. Raw files, raw material content, tokens, signed URLs, API handles, retrieval URLs, and credentials are not persisted or returned. |
 | `upstream` | object | Optional upstream metadata from AgentVerse, ASI:ONE, or another entry agent. |
 | `reportAccess` | object | Optional ASI/ASI:ONE identity/session binding metadata. `accessContext` is accepted as a compatibility alias, but `reportAccess` is the canonical field. Raw tokens must not be sent or stored. |
 

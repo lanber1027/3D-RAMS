@@ -31,6 +31,7 @@ def authorized_material(case_id: str = "case_material_test_001") -> dict:
         "access": {
             "mode": "asio_authorized_reference",
             "expiresAt": "2099-01-01T00:00:00Z",
+            "retrievalUrl": "https://materials.example.invalid/access-plan.pdf?token=DUMMY_RETRIEVAL_URL_SHOULD_NOT_LEAK",
             "token": "DUMMY_MATERIAL_ACCESS_MARKER_SHOULD_NOT_LEAK",
         },
         "rawContent": "DUMMY RAW MATERIAL CONTENT SHOULD NOT LEAK",
@@ -198,6 +199,8 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertEqual(material_ingestion["status"], "ok")
         self.assertEqual(material_ingestion["accepted"], 1)
         self.assertEqual(material_ingestion["skipped"], [])
+        self.assertEqual(material_ingestion["references"][0]["access"]["retrieval"], {"method": "retrieval_url", "provided": True})
+        self.assertEqual(result["request"]["materials"][0]["access"]["retrieval"], {"method": "retrieval_url", "provided": True})
         self.assertEqual(result["runtime"]["materialIngestionStatus"], "ok")
         self.assertEqual(result["runtime"]["materialEvidenceCount"], 1)
 
@@ -217,6 +220,8 @@ class SiteBriefingAgentTests(unittest.TestCase):
 
         serialized = json.dumps(result)
         self.assertNotIn("DUMMY_MATERIAL_ACCESS_MARKER_SHOULD_NOT_LEAK", serialized)
+        self.assertNotIn("DUMMY_RETRIEVAL_URL_SHOULD_NOT_LEAK", serialized)
+        self.assertNotIn("retrievalUrl", serialized)
         self.assertNotIn("DUMMY RAW MATERIAL CONTENT SHOULD NOT LEAK", serialized)
 
     def test_denied_expired_and_oversized_materials_are_skipped_without_secret_leakage(self):

@@ -43,9 +43,12 @@ The entry agent sends a confirmed intake payload only after the user has approve
         "label": "Site access plan",
         "summary": "Uploaded by the ASI user for this case.",
         "caseId": "case_demo_fixture_001",
+        "sizeBytes": 4096,
         "access": {
           "mode": "asio_authorized_reference",
-          "expiresAt": "2026-06-30T18:00:00Z"
+          "expiresAt": "2026-06-30T18:00:00Z",
+          "sessionId": "agentverse-session-id",
+          "retrievalUrl": "<short-lived ASI retrieval URL supplied out of band>"
         }
       }
     ]
@@ -93,9 +96,15 @@ The adapter maps the confirmed intake into the AgentCore invocation envelope.
         "label": "Site access plan",
         "summary": "Uploaded by the ASI user for this case.",
         "caseId": "case_demo_fixture_001",
+        "sizeBytes": 4096,
         "access": {
           "mode": "asio_authorized_reference",
-          "expiresAt": "2026-06-30T18:00:00Z"
+          "expiresAt": "2026-06-30T18:00:00Z",
+          "sessionId": "agentverse-session-id",
+          "retrieval": {
+            "method": "retrieval_url",
+            "provided": true
+          }
         }
       }
     ],
@@ -123,7 +132,7 @@ The adapter maps the confirmed intake into the AgentCore invocation envelope.
 }
 ```
 
-Material references are forwarded as structured `materials`. They are not flattened into `additionalRequest`; the supervisor material-ingestion phase validates case/session binding, expiry, type, and size before producing safe summaries, citations, evidence, and trace reasons.
+Material references are forwarded as structured `materials`. They are not flattened into `additionalRequest`; the supervisor material-ingestion phase validates case/session binding, expiry, type, and size before producing safe summaries, citations, evidence, and trace reasons. When ASI supplies `access.retrievalUrl` or `access.apiHandle`, normal adapter output keeps only `access.retrieval.method` plus `provided: true`; raw URLs, handles, tokens, and signed URLs are not echoed.
 
 The local AgentCore runtime currently preserves this metadata as request context and returns the existing visualization run under `output.run`.
 

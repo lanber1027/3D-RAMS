@@ -233,9 +233,22 @@ def _sanitize_reference(material: dict[str, Any], index: int) -> dict[str, Any]:
             "expiresAt": _text(access.get("expiresAt") or access.get("expires_at")),
             "authorized": access.get("authorized") if isinstance(access.get("authorized"), bool) else None,
             "sessionId": _text(access.get("sessionId") or access.get("session_id")),
+            "retrieval": _safe_retrieval_descriptor(access),
         },
     }
     return _drop_empty(sanitized)
+
+
+def _safe_retrieval_descriptor(access: dict[str, Any]) -> dict[str, Any]:
+    retrieval = access.get("retrieval") if isinstance(access.get("retrieval"), dict) else {}
+    method = _text(retrieval.get("method"))
+    if method in {"retrieval_url", "api_handle"} and retrieval.get("provided") is True:
+        return {"method": method, "provided": True}
+    if access.get("retrievalUrl") or access.get("retrieval_url"):
+        return {"method": "retrieval_url", "provided": True}
+    if access.get("apiHandle") or access.get("api_handle"):
+        return {"method": "api_handle", "provided": True}
+    return {}
 
 
 def _skip_reason(reference: dict[str, Any], *, case_id: str | None, now: datetime) -> str | None:
