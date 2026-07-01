@@ -283,7 +283,10 @@ def _text_from_json(payload: dict[str, Any]) -> str:
     delivery = output.get("delivery") if isinstance(output.get("delivery"), dict) else {}
     summary = delivery.get("customerSummary") if isinstance(delivery.get("customerSummary"), dict) else {}
     if entry_agent.get("assistantMessage"):
-        return _entry_agent_message(entry_agent)
+        message = _entry_agent_message(entry_agent)
+        if isinstance(output.get("structuredReport"), dict) and output.get("reportStatus") == "review_passed":
+            return f"{message}\n\n{_report_lookup_message(output)}"
+        return message
     if output.get("assistantMessage"):
         return str(output["assistantMessage"])
     if summary.get("headline"):
