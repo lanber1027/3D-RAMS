@@ -223,6 +223,10 @@ def _safe_material_references(materials: list[Any], *, case_id: str) -> list[dic
         retrieval = _safe_material_retrieval_descriptor(access)
         if retrieval:
             material["access"]["retrieval"] = retrieval
+        # ponytail: supervisor needs these sensitive handles to retrieve; outputs sanitize them before trace/report/store.
+        for public_key, raw_key in (("retrievalUrl", "retrievalUrl"), ("retrievalUrl", "retrieval_url"), ("apiHandle", "apiHandle"), ("apiHandle", "api_handle")):
+            if access.get(raw_key):
+                material["access"][public_key] = access[raw_key]
         safe.append({key: value for key, value in material.items() if value not in (None, "", [])})
     return safe
 

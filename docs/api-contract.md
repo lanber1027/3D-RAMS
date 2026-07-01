@@ -72,6 +72,8 @@ Known `input` fields:
 | `upstream` | object | Optional upstream metadata from AgentVerse, ASI:ONE, or another entry agent. |
 | `reportAccess` | object | Optional ASI/ASI:ONE identity/session binding metadata. `accessContext` is accepted as a compatibility alias, but `reportAccess` is the canonical field. Raw tokens must not be sent or stored. |
 
+Material retrieval is bounded to 10 MiB and supported content types are PDF, JPEG, PNG, Markdown, and plain text. A short-lived `access.retrievalUrl` may be used directly. For `access.apiHandle`, configure `RAMS_ASI_MATERIAL_API_BASE_URL` and `RAMS_ASI_MATERIAL_API_BEARER_TOKEN`; the supervisor performs `GET {baseUrl}/{urlencoded apiHandle}` with `Authorization: Bearer ...` plus case/session headers. If those settings are absent, the material is skipped as `retrieval_not_configured`.
+
 ## Report Lookup Request
 
 Stored reports can be loaded through the same AgentCore invocation path:

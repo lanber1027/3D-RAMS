@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,6 +14,9 @@ from .telemetry import trace_step
 MATERIAL_REFERENCE_SCHEMA_VERSION = "3d-rams.material-reference.v1"
 MATERIAL_INGESTION_SCHEMA_VERSION = "3d-rams.material-ingestion.v1"
 MAX_MATERIAL_BYTES = 10 * 1024 * 1024
+MATERIAL_FETCH_TIMEOUT_SECONDS = 5
+ASI_MATERIAL_API_BASE_URL_ENV = "RAMS_ASI_MATERIAL_API_BASE_URL"
+ASI_MATERIAL_API_BEARER_TOKEN_ENV = "RAMS_ASI_MATERIAL_API_BEARER_TOKEN"
 ALLOWED_MATERIAL_TYPES = {
     "application/pdf",
     "image/jpeg",
@@ -89,7 +96,12 @@ def ingest_material_references(
     contract with deterministic fixture extracts and safe pre-extracted summaries.
     """
     reference_items = materials if isinstance(materials, list) else []
-    safe_references = sanitize_material_references(reference_items)
+    reference_pairs = [
+        (_sanitize_reference(item, index), item)
+        for index, item in enumerate(reference_items)
+        if isinstance(item, dict)
+    ]
+    safe_references = [reference for reference, _raw_reference in reference_pairs]
     current_time = now or datetime.now(timezone.utc)
     accepted: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -98,13 +110,16 @@ def ingest_material_references(
     findings: list[dict[str, Any]] = []
     citations: list[dict[str, Any]] = []
 
-    for index, reference in enumerate(safe_references):
+    for reference, raw_reference in reference_pairs:
         skip_reason = _skip_reason(reference, case_id=case_id, now=current_time)
         if skip_reason:
             skipped.append(_skipped_material(reference, skip_reason))
             continue
 
-        extracted = _safe_extract(reference)
+        extracted = _safe_extract(reference, raw_reference)
+        if extracted and extracted.get("skipReason"):
+            skipped.append(_skipped_material(reference, str(extracted["skipReason"])))
+            continue
         if extracted is None:
             skipped.append(_skipped_material(reference, "retrieval_not_configured"))
             continue
@@ -258,7 +273,7 @@ def _skip_reason(reference: dict[str, Any], *, case_id: str | None, now: datetim
 
     size_bytes = reference.get("sizeBytes")
     if isinstance(size_bytes, int) and size_bytes > MAX_MATERIAL_BYTES:
-        return "oversized"
+        return "too_large"
 
     access = reference.get("access") if isinstance(reference.get("access"), dict) else {}
     access_status = str(access.get("status") or "").strip().lower()
@@ -288,7 +303,7 @@ def _skip_reason(reference: dict[str, Any], *, case_id: str | None, now: datetim
     return None
 
 
-def _safe_extract(reference: dict[str, Any]) -> dict[str, Any] | None:
+def _safe_extract(reference: dict[str, Any], raw_reference: dict[str, Any] | None = None) -> dict[str, Any] | None:
     fixture = SAFE_FIXTURE_EXTRACTS.get(str(reference.get("materialId") or ""))
     if fixture:
         return {
@@ -298,6 +313,22 @@ def _safe_extract(reference: dict[str, Any]) -> dict[str, Any] | None:
             "confidence": fixture["confidence"],
             "observations": fixture["observations"],
             "citations": fixture.get("citations", []),
+        }
+
+    retrieved = _retrieve_material(reference, raw_reference or {})
+    if retrieved:
+        if retrieved["status"] != "retrieved":
+            return {"skipReason": retrieved["status"]}
+        return {
+            "status": "retrieved",
+            "retrievalMode": retrieved["mode"],
+            "summary": (
+                f"Retrieved authorized {retrieved['contentType']} material "
+                f"({retrieved['sizeBytes']} byte(s)) for bounded material extraction; raw content is not stored."
+            ),
+            "confidence": "low",
+            "observations": [],
+            "citations": [{"label": reference["label"], "locator": "retrieved bounded material; raw content not stored"}],
         }
 
     summary = _text(reference.get("summary"))
@@ -322,6 +353,80 @@ def _safe_extract(reference: dict[str, Any]) -> dict[str, Any] | None:
             "citations": [{"label": reference["label"], "locator": "ASI supplied safe summary"}],
         }
     return None
+
+
+def _retrieve_material(reference: dict[str, Any], raw_reference: dict[str, Any]) -> dict[str, Any] | None:
+    raw_access = raw_reference.get("access") if isinstance(raw_reference.get("access"), dict) else {}
+    retrieval_url = _text(raw_access.get("retrievalUrl") or raw_access.get("retrieval_url"))
+    api_handle = _text(raw_access.get("apiHandle") or raw_access.get("api_handle"))
+    if retrieval_url:
+        return _fetch_material_url(retrieval_url, reference, mode="retrieval_url")
+    if api_handle:
+        base_url = _text(os.getenv(ASI_MATERIAL_API_BASE_URL_ENV))
+        bearer_token = _text(os.getenv(ASI_MATERIAL_API_BEARER_TOKEN_ENV))
+        if not base_url or not bearer_token:
+            return {"status": "retrieval_not_configured"}
+        url = f"{base_url.rstrip('/')}/{urllib.parse.quote(api_handle, safe='')}"
+        headers = {"Authorization": f"Bearer {bearer_token}"}
+        case_id = _text(reference.get("caseId"))
+        session_id = _text((reference.get("access") or {}).get("sessionId")) if isinstance(reference.get("access"), dict) else None
+        if case_id:
+            headers["X-3D-RAMS-Case-Id"] = case_id
+        if session_id:
+            headers["X-3D-RAMS-Session-Id"] = session_id
+        return _fetch_material_url(url, reference, mode="api_handle", headers=headers)
+    return None
+
+
+def _fetch_material_url(
+    url: str,
+    reference: dict[str, Any],
+    *,
+    mode: str,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    try:
+        request = urllib.request.Request(url, headers=headers or {}, method="GET")
+        with urllib.request.urlopen(request, timeout=MATERIAL_FETCH_TIMEOUT_SECONDS) as response:
+            declared_length = _non_negative_int(response.headers.get("Content-Length"))
+            if isinstance(declared_length, int) and declared_length > MAX_MATERIAL_BYTES:
+                return {"status": "too_large"}
+            content_type = _content_type(response.headers.get("Content-Type"), fallback=str(reference.get("type") or ""))
+            if content_type not in ALLOWED_MATERIAL_TYPES:
+                return {"status": "unsupported_type"}
+            data = response.read(MAX_MATERIAL_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        return {"status": _http_retrieval_status(exc.code)}
+    except (OSError, ValueError, urllib.error.URLError):
+        return {"status": "retrieval_failed"}
+
+    if len(data) > MAX_MATERIAL_BYTES:
+        return {"status": "too_large"}
+    return {
+        "status": "retrieved",
+        "mode": mode,
+        "contentType": content_type,
+        "sizeBytes": len(data),
+    }
+
+
+def _content_type(value: str | None, *, fallback: str) -> str:
+    content_type = _text(value)
+    if not content_type:
+        return fallback.lower()
+    return content_type.split(";", 1)[0].strip().lower()
+
+
+def _http_retrieval_status(status_code: int) -> str:
+    if status_code in {401, 403}:
+        return "denied"
+    if status_code == 410:
+        return "expired"
+    if status_code == 413:
+        return "too_large"
+    if status_code == 415:
+        return "unsupported_type"
+    return "retrieval_failed"
 
 
 def _citations(reference: dict[str, Any], source_id: str, extracted: dict[str, Any]) -> list[dict[str, Any]]:

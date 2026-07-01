@@ -125,7 +125,7 @@ class AgentVerseAdapterTests(unittest.TestCase):
         self.assertNotIn("signedUrl", agent_input["materials"][0])
         self.assertNotIn("early feasibility walkover", agent_input["additionalRequest"])
 
-    def test_material_access_retrieval_artifacts_are_marked_not_exposed(self):
+    def test_material_access_retrieval_artifacts_forward_only_to_supervisor_input(self):
         payload = confirmed_entry_payload()
         payload["intake"]["materials"] = [
             {
@@ -168,14 +168,13 @@ class AgentVerseAdapterTests(unittest.TestCase):
         self.assertEqual(materials[0]["access"]["sessionId"], "agentverse-session-id")
         self.assertEqual(materials[0]["access"]["retrieval"], {"method": "retrieval_url", "provided": True})
         self.assertEqual(materials[1]["access"]["retrieval"], {"method": "api_handle", "provided": True})
+        self.assertEqual(materials[0]["access"]["retrievalUrl"], "https://materials.example.invalid/private.pdf?token=secret-token")
+        self.assertEqual(materials[1]["access"]["apiHandle"], "asi-material-handle-secret")
         for secret in (
-            "retrievalUrl",
-            "apiHandle",
-            "secret-token",
             "another-secret-token",
             "signed-secret",
             "private document text",
-            "asi-material-handle-secret",
+            "bearerToken",
         ):
             self.assertNotIn(secret, serialized)
 

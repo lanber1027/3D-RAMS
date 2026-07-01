@@ -271,7 +271,7 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertEqual(ingestion["status"], "warning")
         self.assertEqual(ingestion["accepted"], 0)
         reasons = {item["reason"] for item in ingestion["skipped"]}
-        self.assertEqual(reasons, {"denied", "expired", "oversized"})
+        self.assertEqual(reasons, {"denied", "expired", "too_large"})
 
         trace_step = next(step for step in result["trace"] if step["name"] == "ingest_material_references")
         self.assertEqual(trace_step["status"], "warning")
