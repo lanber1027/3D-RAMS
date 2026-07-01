@@ -4,6 +4,7 @@ import os
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -186,6 +187,83 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertTrue(all("id" in step for step in result["trace"]))
         self.assertTrue(all("sourceIds" in step for step in result["trace"]))
         self.assertTrue(any(step["name"] == "generate_bedrock_briefing" for step in result["trace"]))
+
+    def test_live_map_features_success_returns_live_scene_and_real_positions(self):
+        planning_response = Mock()
+        planning_response.raise_for_status.return_value = None
+        planning_response.json.return_value = {
+            "entities": [
+                {
+                    "entity": 123,
+                    "dataset": "conservation-area",
+                    "name": "Live Conservation Area",
+                    "point": "POINT(-0.120000 51.500000)",
+                    "geometry": "POINT(-0.120000 51.500000)",
+                }
+            ]
+        }
+        overpass_response = Mock()
+        overpass_response.raise_for_status.return_value = None
+        overpass_response.json.return_value = {
+            "elements": [
+                {
+                    "type": "way",
+                    "id": 456,
+                    "tags": {"waterway": "river", "name": "Live River"},
+                    "center": {"lat": 51.501, "lon": -0.121},
+                    "geometry": [{"lat": 51.500, "lon": -0.122}, {"lat": 51.502, "lon": -0.120}],
+                }
+            ]
+        }
+
+        with EnvPatch(ENABLE_LIVE_MAP_FEATURES="true", LIVE_MAP_REQUIRED="true"), patch(
+            "app.live_map_features.httpx.get",
+            return_value=planning_response,
+        ), patch("app.live_map_features.httpx.post", return_value=overpass_response):
+            result = run_site_briefing({"latitude": 51.5, "longitude": -0.12, "useBedrock": False})
+
+        self.assertEqual(result["scene"]["mode"], "live-cesium")
+        self.assertTrue(result["runtime"]["liveApiCalls"])
+        self.assertEqual(result["liveFeatureStatus"]["status"], "live")
+        self.assertGreaterEqual(len(result["mapFeatures"]), 2)
+        self.assertTrue(any(annotation["positionMode"] == "feature-centroid" for annotation in result["annotations"]))
+        self.assertTrue(any(item["id"] == "osm-live" and item["status"] == "real" for item in result["evidence"]))
+
+    def test_live_map_features_partial_failure_keeps_partial_scene(self):
+        planning_response = Mock()
+        planning_response.raise_for_status.return_value = None
+        planning_response.json.return_value = {
+            "entities": [
+                {
+                    "entity": 999,
+                    "dataset": "flood-risk-zone",
+                    "name": "Flood Zone",
+                    "point": "POINT(-0.120000 51.500000)",
+                }
+            ]
+        }
+
+        with EnvPatch(ENABLE_LIVE_MAP_FEATURES="true"), patch(
+            "app.live_map_features.httpx.get",
+            return_value=planning_response,
+        ), patch("app.live_map_features.httpx.post", side_effect=RuntimeError("overpass down")):
+            result = run_site_briefing({"latitude": 51.5, "longitude": -0.12, "useBedrock": False})
+
+        self.assertEqual(result["scene"]["mode"], "live-partial")
+        self.assertEqual(result["liveFeatureStatus"]["status"], "partial")
+        self.assertTrue(result["runtime"]["liveApiCalls"])
+        self.assertTrue(result["liveFeatureStatus"]["failedSources"])
+
+    def test_live_map_features_fallback_when_not_required(self):
+        with EnvPatch(ENABLE_LIVE_MAP_FEATURES="true", LIVE_MAP_REQUIRED="false"), patch(
+            "app.live_map_features.httpx.get",
+            side_effect=RuntimeError("planning down"),
+        ), patch("app.live_map_features.httpx.post", side_effect=RuntimeError("overpass down")):
+            result = run_site_briefing({"latitude": 51.5, "longitude": -0.12, "useBedrock": False})
+
+        self.assertEqual(result["scene"]["mode"], "synthetic-fallback")
+        self.assertFalse(result["runtime"]["liveApiCalls"])
+        self.assertGreaterEqual(len(result["annotations"]), 1)
 
     def test_bedrock_mock_mode_updates_briefing_and_trace(self):
         with EnvPatch(

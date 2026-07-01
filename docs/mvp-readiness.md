@@ -21,7 +21,7 @@ Current evidence snapshot:
 | Agent workflow | Verified in deterministic mode | `scripts/evaluate-demo.py` checks nine scenarios. |
 | Frontend build | Verified | `scripts/check-demo.sh` and CI run the production build. |
 | HTTP runtime smoke | Verified | One-command checks start backend and frontend preview, then verify `/health`, `/api/run`, and the frontend shell. |
-| Public fixture pack | Ready for demo use | `public-lambeth-thames` cached fixture uses public-safe source metadata and no live runtime calls. |
+| Public fixture pack | Ready for demo use | `public-lambeth-thames` cached fixture uses public-safe source metadata; live runtime calls occur only when live-map MVP flags are enabled. |
 | Architecture visualizer | Ready for demo use | UI and [architecture.md](architecture.md) show tool sequence, boundaries, trace, and AWS path. |
 | Safety gate | Verified for demo boundary | Unsafe certified RAMS/work-approval requests are blocked in tests and evaluation. |
 | CI | Active | GitHub Actions runs the local verification stack on push and pull request. |
@@ -55,7 +55,7 @@ Fresh Windows clone:
 powershell -ExecutionPolicy Bypass -File scripts/check-demo.ps1 -Install
 ```
 
-These checks compile code, run backend/API tests, run deterministic evaluation, build the frontend, and start a no-AWS backend/frontend HTTP smoke test. They do not require AWS credentials, Google keys, Cesium ion tokens, live planning portals, hosted infrastructure, real site data, or private documents.
+These checks compile code, run backend/API tests, run deterministic evaluation, build the frontend, and start a no-AWS backend/frontend HTTP smoke test. The deterministic checks do not require AWS credentials, Google keys, Cesium ion tokens, live planning portals, hosted infrastructure, real site data, or private documents. Live 3D MVP testing additionally requires a restricted `VITE_CESIUM_ION_TOKEN` and `ENABLE_LIVE_MAP_FEATURES=true`.
 
 ## Verified Scenarios
 
@@ -75,9 +75,9 @@ The deterministic evaluation runner covers:
 
 | Area | Current Boundary |
 | --- | --- |
-| Planning data | Cached fixture only; no live planning portal scraping in MVP. |
+| Planning data | Cached fixture by default; live Planning Data point-constraint lookup available in live-map MVP mode. |
 | Public source freshness | Source metadata is visible, but the app does not refresh sources at runtime. |
-| 3D map data | Token-free local Cesium view and fixture overlay; no Google Earth/3D Tiles. |
+| 3D map data | Real Cesium terrain/imagery/buildings with `VITE_CESIUM_ION_TOKEN`; labelled synthetic fallback without token. |
 | Bedrock | Hosted server-side model-assisted planner/synthesis behind access-code validation; deterministic fallback remains available. |
 | AWS hosted path | Amplify, API Gateway, Lambda, Bedrock, DynamoDB, S3 presign, and CloudWatch structured logs are live for MVP testing. |
 | AWS future path | Cognito, Guardrails, AgentCore, CloudWatch dashboards, API throttling/WAF, and richer live adapters remain deferred. |

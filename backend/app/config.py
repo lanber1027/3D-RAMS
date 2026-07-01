@@ -59,6 +59,15 @@ class RuntimeConfig:
     dynamodb_session_table: str | None
     upload_retention_days: int
     session_retention_days: int
+    agentcore_runtime_enabled: bool
+    agentcore_runtime_arn: str | None
+    agentcore_memory_enabled: bool
+    agentcore_memory_id: str | None
+    enable_live_map_features: bool
+    live_map_required: bool
+    live_feature_radius_meters: int
+    overpass_api_url: str
+    planning_data_api_base: str
 
     @classmethod
     def from_env(cls, *, request_bedrock: bool = True) -> "RuntimeConfig":
@@ -94,6 +103,15 @@ class RuntimeConfig:
             dynamodb_session_table=os.getenv("DYNAMODB_SESSION_TABLE") or None,
             upload_retention_days=_env_int("UPLOAD_RETENTION_DAYS", 7),
             session_retention_days=_env_int("SESSION_RETENTION_DAYS", 7),
+            agentcore_runtime_enabled=_env_bool("ENABLE_AGENTCORE_RUNTIME", False),
+            agentcore_runtime_arn=os.getenv("AGENTCORE_RUNTIME_ARN") or None,
+            agentcore_memory_enabled=_env_bool("ENABLE_AGENTCORE_MEMORY", False),
+            agentcore_memory_id=os.getenv("AGENTCORE_MEMORY_ID") or None,
+            enable_live_map_features=_env_bool("ENABLE_LIVE_MAP_FEATURES", False),
+            live_map_required=_env_bool("LIVE_MAP_REQUIRED", False),
+            live_feature_radius_meters=min(max(_env_int("LIVE_FEATURE_RADIUS_METERS", 350), 50), 1200),
+            overpass_api_url=os.getenv("OVERPASS_API_URL", "https://overpass-api.de/api/interpreter"),
+            planning_data_api_base=os.getenv("PLANNING_DATA_API_BASE", "https://www.planning.data.gov.uk"),
         )
 
     def public_runtime(self, *, status: str, fallback_reason: str | None = None) -> dict[str, object]:
@@ -113,4 +131,10 @@ class RuntimeConfig:
             },
             "maxToolCalls": self.durable_run_max_tool_calls,
             "fallbackReason": fallback_reason,
+            "agentCoreRuntimeEnabled": self.agentcore_runtime_enabled,
+            "agentCoreMemoryEnabled": self.agentcore_memory_enabled,
+            "agentCoreStatus": "configured" if self.agentcore_runtime_enabled and self.agentcore_runtime_arn else "agentcore-ready-lambda-adapter",
+            "liveMapFeaturesEnabled": self.enable_live_map_features,
+            "liveMapRequired": self.live_map_required,
+            "liveFeatureRadiusMeters": self.live_feature_radius_meters,
         }

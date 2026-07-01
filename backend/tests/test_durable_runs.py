@@ -253,6 +253,38 @@ class DurableRunApiTests(unittest.TestCase):
         self.assertEqual(result["result"]["runtime"]["fixturePackMode"], "synthetic-default")
         self.assertNotIn("8 Albert Embankment", result["result"]["assistantMessage"])
 
+    def test_conversation_follow_up_uses_session_memory_not_new_site_run(self):
+        with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None, DURABLE_RUN_PROCESS_INLINE="true"):
+            session = self._session()
+            first = self.client.post(
+                "/api/conversation/message",
+                json={
+                    "sessionId": session["sessionId"],
+                    "message": "I want to visit Greenacre Solar Farm tomorrow for a survey. Please prepare a pre-visit RAMS-style review pack.",
+                    "useBedrock": False,
+                },
+            ).json()
+            follow_up = self.client.post(
+                "/api/conversation/message",
+                json={
+                    "sessionId": session["sessionId"],
+                    "message": "What do you mean",
+                    "useBedrock": False,
+                },
+            ).json()
+            session_state = self.client.get(f"/api/session/{session['sessionId']}").json()
+
+        self.assertEqual(first["action"], "started_run")
+        self.assertEqual(first["run"]["status"], "waiting_for_location_confirmation")
+        self.assertEqual(follow_up["action"], "answered_from_memory")
+        self.assertEqual(follow_up["route"], "follow_up")
+        self.assertNotIn("review pack for What do you mean", follow_up["assistantMessage"])
+        self.assertIn("previous step", follow_up["assistantMessage"])
+        self.assertEqual(len(session_state["runs"]), 1)
+        self.assertEqual(session_state["runs"][0]["runId"], first["run"]["runId"])
+        self.assertEqual(session_state["workingMemory"]["activeRunId"], first["run"]["runId"])
+        self.assertEqual(session_state["workingMemory"]["pendingUserAction"], "confirm_or_correct_location")
+
     def test_durable_run_geoapify_candidate_requires_confirmation_before_tools(self):
         fake_response = Mock()
         fake_response.raise_for_status.return_value = None

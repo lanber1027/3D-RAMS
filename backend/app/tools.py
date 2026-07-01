@@ -6,6 +6,7 @@ from typing import Any
 from .bedrock_adapter import BedrockAdapterError, generate_bedrock_briefing
 from .config import RuntimeConfig
 from .fixtures import load_json, load_text
+from .live_map_features import load_live_map_features
 
 
 AWS_TRACE_MAPPING = {
@@ -140,11 +141,29 @@ def source_register(
     sources.extend(
         [
         {
+            "id": "planning-data-live",
+            "label": "Planning Data API live constraints",
+            "kind": "planning_designations",
+            "status": "real" if config.enable_live_map_features else "future",
+            "origin": config.planning_data_api_base,
+            "trustBoundary": "Server-side public API adapter",
+            "awsMapping": "Lambda/FastAPI outbound HTTPS plus CloudWatch source metadata",
+        },
+        {
+            "id": "osm-live",
+            "label": "OpenStreetMap / Overpass live features",
+            "kind": "geospatial_features",
+            "status": "real" if config.enable_live_map_features else "future",
+            "origin": config.overpass_api_url,
+            "trustBoundary": "Server-side public API adapter",
+            "awsMapping": "Lambda/FastAPI outbound HTTPS plus CloudWatch source metadata",
+        },
+        {
             "id": "cesium-local",
-            "label": "Local Cesium scene configuration",
+            "label": "CesiumJS terrain, imagery, buildings, and overlays",
             "kind": "3d_scene",
             "status": "real",
-            "origin": "Frontend CesiumJS with backend scene config",
+            "origin": "Browser CesiumJS with backend scene/map feature config",
             "trustBoundary": "Browser rendering",
             "awsMapping": "CloudFront/static frontend plus App Runner/API Gateway backend",
         },
@@ -253,9 +272,12 @@ def load_geospatial_features(
     location: dict[str, Any],
     simulate_failure: bool = False,
     fixture_pack: dict[str, Any] | None = None,
+    config: RuntimeConfig | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    active_config = config or RuntimeConfig.from_env(request_bedrock=False)
     if simulate_failure:
         features = load_json("geospatial_features.json")["fallback_features"]
+        _attach_feature_status(features, "fallback", "simulated-map-failure")
         return features, trace_step(
             "load_geospatial_features",
             "fallback",
@@ -266,9 +288,40 @@ def load_geospatial_features(
             fallback_reason="Fallback used after simulated live map provider failure for demo testing.",
         )
 
+    if active_config.enable_live_map_features:
+        live_features, live_status = load_live_map_features(location, active_config)
+        if live_features:
+            _attach_feature_status(live_features, live_status["status"], "live-public-features")
+            return live_features, trace_step(
+                "load_geospatial_features",
+                "ok" if live_status["status"] == "live" else "warning",
+                "Loaded live public map features from server-side public data adapters.",
+                {
+                    "feature_count": len(live_features),
+                    "dataMode": "live-public",
+                    "liveFeatureStatus": live_status,
+                    "sources": live_status["successfulSources"],
+                },
+                source_ids=["planning-data-live", "osm-live"],
+                evidence_ids=["planning-data-live", "osm-live"],
+                fallback_reason=None if live_status["status"] == "live" else "One or more live map providers failed; partial live features are shown.",
+                duration_ms=live_status["latencyMs"],
+            )
+        if active_config.live_map_required:
+            return [], trace_step(
+                "load_geospatial_features",
+                "failed",
+                "Live map features were required but no live public features could be loaded.",
+                {"feature_count": 0, "dataMode": "live-public", "liveFeatureStatus": live_status},
+                source_ids=["planning-data-live", "osm-live"],
+                fallback_reason="LIVE_MAP_REQUIRED=true and all live map providers failed.",
+                duration_ms=live_status["latencyMs"],
+            )
+
     if fixture_pack:
         geospatial = fixture_pack.get("geospatial", {})
         features = geospatial.get("features", [])
+        _attach_feature_status(features, "cached-fallback", "cached-public-fixture")
         source_ids = geospatial.get("source_ids", [])
         evidence_ids = geospatial.get("evidence_ids", source_ids)
         return features, trace_step(
@@ -286,6 +339,7 @@ def load_geospatial_features(
         )
 
     features = load_json("geospatial_features.json")["features"]
+    _attach_feature_status(features, "synthetic-fallback", "synthetic-fixture")
     return features, trace_step(
         "load_geospatial_features",
         "ok",
@@ -302,17 +356,37 @@ def build_scene_config(
     fixture_pack: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     uses_geo_fallback = any(feature["id"].startswith("fallback") for feature in features)
+    live_features = [feature for feature in features if feature.get("dataMode") == "live-public"]
+    feature_status = _feature_status(features)
+    scene_mode = (
+        "live-cesium"
+        if feature_status == "live"
+        else "live-partial"
+        if feature_status == "partial"
+        else "cached-fallback"
+        if fixture_pack
+        else "synthetic-fallback"
+    )
     geo_source_ids = (
         ["geo-fallback"]
         if uses_geo_fallback
         else (
             fixture_pack.get("geospatial", {}).get("source_ids", [])
             if fixture_pack
+            else ["planning-data-live", "osm-live"]
+            if live_features
             else ["geo-fixture"]
         )
     )
     scene = {
-        "provider": "cesium-local-cached-fixture" if fixture_pack else "cesium-local-fixture",
+        "provider": "cesium-live-public" if live_features else "cesium-local-cached-fixture" if fixture_pack else "cesium-local-fixture",
+        "mode": scene_mode,
+        "providers": {
+            "terrain": "cesium-ion-world-terrain",
+            "imagery": "cesium-ion-world-imagery",
+            "buildings": "cesium-osm-buildings",
+            "liveFeatures": feature_status if live_features else "not-enabled",
+        },
         "center": {
             "latitude": location["latitude"],
             "longitude": location["longitude"],
@@ -322,20 +396,41 @@ def build_scene_config(
             "headingDegrees": 25,
             "pitchDegrees": -42,
             "rangeMeters": 1800,
+            "heightMeters": 1500,
         },
-        "terrain": "ellipsoid fallback",
+        "terrain": "cesium world terrain when VITE_CESIUM_ION_TOKEN is configured; ellipsoid fallback otherwise",
         "featureCount": len(features),
+        "liveFeatureCount": len(live_features),
         "fixturePack": fixture_pack["name"] if fixture_pack else None,
-        "dataMode": "cached-public-fixture" if fixture_pack else "synthetic-fixture",
-        "note": "No Google Maps, Google Earth, Cesium ion key, or live geospatial API is required for Demo1.",
+        "dataMode": "live-public" if live_features else "cached-public-fixture" if fixture_pack else "synthetic-fixture",
+        "note": "Live 3D MVP uses Cesium ion terrain/imagery/buildings when a browser token is configured. Live public features are fetched server-side when enabled.",
     }
     return scene, trace_step(
         "build_scene_config",
         "ok",
-        "Created a 3D scene configuration from the resolved coordinate and feature fixture.",
+        "Created a 3D scene configuration from the resolved coordinate and available map features.",
         {"scene": scene},
         source_ids=[*location.get("sourceIds", ["location-fixture"]), *geo_source_ids],
     )
+
+
+def _attach_feature_status(features: list[dict[str, Any]], status: str, mode: str) -> None:
+    for feature in features:
+        feature.setdefault("featureStatus", status)
+        feature.setdefault("featureMode", mode)
+
+
+def _feature_status(features: list[dict[str, Any]]) -> str:
+    statuses = {feature.get("featureStatus") for feature in features if feature.get("featureStatus")}
+    if "live" in statuses and "partial" not in statuses:
+        return "live"
+    if "live" in statuses or "partial" in statuses:
+        return "partial"
+    if "cached-fallback" in statuses:
+        return "cached-fallback"
+    if "fallback" in statuses:
+        return "fallback"
+    return "synthetic-fallback"
 
 
 def load_planning_context(
@@ -423,20 +518,35 @@ def extract_hazard_notes(
         )
 
     hazards: list[dict[str, Any]] = []
-    geo_source_id = "geo-fallback" if any(feature["id"].startswith("fallback") for feature in features) else "geo-fixture"
+    feature_status = _feature_status(features)
+    geo_source_id = (
+        "planning-data-live"
+        if any(feature.get("dataMode") == "live-public" and feature.get("layer") == "planning" for feature in features)
+        else "osm-live"
+        if any(feature.get("dataMode") == "live-public" for feature in features)
+        else "geo-fallback"
+        if any(feature["id"].startswith("fallback") for feature in features)
+        else "geo-fixture"
+    )
 
     for feature in features:
-        if feature["type"] in {"watercourse", "slope", "access_track", "bridge"}:
+        if feature["type"] in {"watercourse", "slope", "access_track", "bridge", "building", "designation", "interface"}:
             hazards.append(
                 {
                     "id": f"geo-{feature['id']}",
                     "title": feature["label"],
                     "category": feature["type"],
-                    "source": "geospatial fixture",
-                    "sourceIds": [geo_source_id],
-                    "evidenceIds": ["geo-fixture"],
+                    "source": feature.get("provider") or "geospatial fixture",
+                    "sourceIds": feature.get("sourceIds") or [geo_source_id],
+                    "evidenceIds": feature.get("evidenceIds") or ([geo_source_id] if feature.get("dataMode") == "live-public" else ["geo-fixture"]),
                     "confidence": feature.get("confidence", "medium"),
                     "note": feature["risk_note"],
+                    "dataMode": feature.get("dataMode"),
+                    "geometry": feature.get("geometry"),
+                    "centroid": feature.get("centroid"),
+                    "mapFeatureId": feature.get("id"),
+                    "layer": feature.get("layer"),
+                    "attribution": feature.get("attribution"),
                 }
             )
 
@@ -473,6 +583,8 @@ def extract_hazard_notes(
         "Extracted hazard notes from fixture data and prompt-derived provisional risk profiles.",
         {
             "hazard_count": len(hazards),
+            "live_feature_count": len([feature for feature in features if feature.get("dataMode") == "live-public"]),
+            "featureStatus": feature_status,
             "provisional_count": len([hazard for hazard in hazards if hazard.get("dataMode") == "provisional-from-user-description"]),
         },
         source_ids=[geo_source_id, "planning-fixture", "provisional-from-user-description"],
@@ -491,26 +603,37 @@ def create_annotations(location: dict[str, Any], hazards: list[dict[str, Any]]) 
     ]
     annotations = []
     for index, hazard in enumerate(hazards[:8]):
+        centroid = hazard.get("centroid") or {}
+        has_real_position = centroid.get("latitude") is not None and centroid.get("longitude") is not None
         lat_offset, lon_offset = offsets[index % len(offsets)]
         annotations.append(
             {
                 "id": hazard["id"],
                 "title": hazard["title"],
                 "category": hazard["category"],
-                "latitude": round(location["latitude"] + lat_offset, 6),
-                "longitude": round(location["longitude"] + lon_offset, 6),
+                "latitude": round(float(centroid["latitude"]) if has_real_position else location["latitude"] + lat_offset, 6),
+                "longitude": round(float(centroid["longitude"]) if has_real_position else location["longitude"] + lon_offset, 6),
                 "confidence": hazard["confidence"],
                 "note": hazard["note"],
                 "sourceIds": hazard.get("sourceIds", []),
                 "evidenceIds": hazard.get("evidenceIds", []),
+                "geometry": hazard.get("geometry"),
+                "mapFeatureId": hazard.get("mapFeatureId"),
+                "layer": hazard.get("layer"),
+                "positionMode": "feature-centroid" if has_real_position else "schematic-offset",
+                "attribution": hazard.get("attribution"),
             }
         )
 
     return annotations, trace_step(
         "create_annotations",
         "ok",
-        "Converted hazards into 3D map annotations with fixture offsets.",
-        {"annotation_count": len(annotations)},
+        "Converted hazards into 3D map annotations using live feature centroids when available and schematic offsets otherwise.",
+        {
+            "annotation_count": len(annotations),
+            "realPositionCount": len([annotation for annotation in annotations if annotation["positionMode"] == "feature-centroid"]),
+            "schematicPositionCount": len([annotation for annotation in annotations if annotation["positionMode"] == "schematic-offset"]),
+        },
         evidence_ids=[hazard["id"] for hazard in hazards[:8]],
     )
 
@@ -566,15 +689,39 @@ def generate_site_brief(
             evidence_ids=[item["id"] for item in evidence],
         )
 
-    evidence = [
-        {
-            "id": "geo-fixture",
-            "title": "Mock geospatial feature pack",
-            "source": "fixtures/geospatial_features.json",
-            "status": "mocked",
-            "why_it_matters": "Provides watercourse, slope, access, bridge, and imagery-derived features for Demo1.",
-        }
-    ]
+    live_hazards = [hazard for hazard in hazards if hazard.get("dataMode") == "live-public"]
+    evidence = []
+    if live_hazards:
+        evidence.append(
+            {
+                "id": "osm-live",
+                "title": "Live OSM / Overpass nearby feature query",
+                "source": "OpenStreetMap via Overpass API",
+                "status": "real",
+                "sourceIds": ["osm-live"],
+                "why_it_matters": "Provides live nearby building, access, water, rail, power, and barrier features for 3D overlays.",
+            }
+        )
+        evidence.append(
+            {
+                "id": "planning-data-live",
+                "title": "Live Planning Data point constraints",
+                "source": "planning.data.gov.uk/entity.json",
+                "status": "real",
+                "sourceIds": ["planning-data-live"],
+                "why_it_matters": "Provides live planning/designation constraints intersecting the confirmed coordinate.",
+            }
+        )
+    else:
+        evidence.append(
+            {
+                "id": "geo-fixture",
+                "title": "Mock geospatial feature pack",
+                "source": "fixtures/geospatial_features.json",
+                "status": "mocked",
+                "why_it_matters": "Provides watercourse, slope, access, bridge, and imagery-derived features for Demo1.",
+            }
+        )
     if planning_text:
         evidence.append(
             {
@@ -597,7 +744,11 @@ def generate_site_brief(
         )
 
     limitations = [
-        "Demo1 uses synthetic fixtures and must not be treated as certified RAMS.",
+        (
+            "Live public feature lookups are incomplete and must not be treated as certified RAMS."
+            if live_hazards
+            else "Demo1 uses synthetic fixtures and must not be treated as certified RAMS."
+        ),
         "Prompt-derived risks are provisional and are not evidence-backed site findings.",
         "All hazards need competent human review and current source checks before site work.",
         "Imagery-derived or inferred features are labelled low confidence.",
@@ -610,7 +761,7 @@ def generate_site_brief(
         "headline": "Pre-visit 3D field briefing for early RAMS scoping.",
         "summary": [
             f"Coordinate resolved to {location['latitude']}, {location['longitude']} with authority/context label: {location.get('authority', 'not available')}.",
-            f"{len(hazards)} candidate hazards were found from geospatial and planning fixtures.",
+            f"{len(hazards)} candidate hazards were found from {'live public map features' if live_hazards else 'geospatial and planning fixtures'}.",
             "The output is a review pack, not operational approval.",
         ],
         "priority_checks": [hazard["title"] for hazard in hazards[:5]],
@@ -877,7 +1028,13 @@ def architecture_snapshot(
             "coordinate": f"{request_summary['latitude']}, {request_summary['longitude']}",
             "fixturePack": request_summary.get("fixturePack") or "synthetic-default",
             "planningFixture": "enabled" if request_summary["includePlanningFixture"] else "disabled",
-            "mapMode": "fallback" if request_summary["simulateMapFailure"] else "fixture",
+            "mapMode": (
+                runtime.get("liveFeatureStatus", {}).get("status")
+                if runtime.get("liveApiCalls")
+                else "fallback"
+                if request_summary["simulateMapFailure"]
+                else "fixture"
+            ),
             "briefingMode": runtime["briefingMode"],
             "safetyLevel": safety["level"],
         },
@@ -946,7 +1103,18 @@ def architecture_snapshot(
                 ),
             },
             {"component": "Bedrock planner/synthesis", "status": str(runtime["briefingMode"])},
-            {"component": "3D viewer", "status": "real local Cesium scene"},
+            {
+                "component": "3D viewer",
+                "status": "real Cesium terrain/buildings when VITE_CESIUM_ION_TOKEN is configured",
+            },
+            {
+                "component": "Live map features",
+                "status": (
+                    f"real live public APIs: {runtime.get('liveFeatureStatus', {}).get('status')}"
+                    if runtime.get("liveApiCalls")
+                    else "disabled or fallback"
+                ),
+            },
             {
                 "component": "Planning documents",
                 "status": "cached public-safe notes" if runtime.get("fixturePack") else "synthetic fixture",

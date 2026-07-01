@@ -32,7 +32,8 @@ Read the full problem statement in [docs/problem-statement.md](docs/problem-stat
 
 ![3D-RAMS query-to-brief architecture flow](docs/assets/architecture/query-to-brief-flow.svg)
 
-This rendered diagram is the README-scale view of the workflow in [docs/architecture.md](docs/architecture.md). The detailed architecture document remains the source of truth for the full Mermaid diagrams, trust boundaries, real-vs-mocked register, safety gate, and future AWS path.
+This rendered diagram is the README-scale view of the hosted durable-run workflow in [docs/architecture.md](docs/architecture.md). The detailed architecture document remains the source of truth for the full Mermaid diagrams, trust boundaries, real-vs-mocked register, safety gate, AgentCore-ready conversation boundary, and AWS path.
+The current implementation adds bounded conversation memory and guarded routing in front of that durable run path; managed AgentCore Runtime/Memory activation remains a later reviewed AWS gate.
 
 ## Demo Workflow
 
@@ -51,13 +52,14 @@ This rendered diagram is the README-scale view of the workflow in [docs/architec
 | Component | Demo1 Status | Notes |
 | --- | --- | --- |
 | Agent workflow | Real Python code | Chat session, tool sequence, evidence, trace, safety gate, deterministic fallback, and response shape are implemented. |
+| Conversation memory/router | Active AgentCore-ready rebuild slice | The hosted Lambda adapter now keeps bounded recent turns and structured working memory so follow-up/status questions do not silently start fake site runs. Managed AgentCore Runtime/Memory activation remains a gated AWS step. |
 | Intent and safety parser | Real V3.1 control flow | Extracts clean site labels, coordinates/postcodes, nearest-town clues, site/activity type, and unsafe certification/approval intent before tool execution. |
 | Location-resolution loop | Real V3.1 control flow with fixture-first and postcode-source resolver | Recognizable named-site prompts do not silently map to Lambeth. Candidate locations require user confirmation before the review workflow starts. Postcode/outcode clues can create source-labelled Postcodes.io candidates server-side; name-only prompts ask for stronger location evidence. |
 | Provisional risk profiles | Real rule layer, not site evidence | Coordinate-backed arbitrary sites get site/activity-specific provisional prompts, such as solar/PV, quarry, drainage/slope, roof, substation/BESS, delivery, and access-track checks. These are labelled provisional, not evidence-backed site findings. |
-| Public data pack | Cached public fixture | `fixtures/public-lambeth-thames` includes source metadata for a Lambeth / Thames public-data pack anchored on 8 Albert Embankment. Runtime makes no live planning/geospatial public-data calls. |
+| Public data pack | Cached public fixture plus live-map option | `fixtures/public-lambeth-thames` remains the deterministic fallback. When `ENABLE_LIVE_MAP_FEATURES=true`, the backend can fetch live Planning Data and OSM/Overpass features after location confirmation. |
 | Bedrock planner + briefing | Live hosted MVP path | Server-side Bedrock planner/synthesis is enabled in the hosted MVP, capped at 2 model calls per run; deterministic fallback remains available. |
-| 3D viewer | Real React/Vite + CesiumJS UI | Uses a token-free Cesium canvas plus local scene overlay and annotations. |
-| Geospatial features | Cached-public or mocked fixture | Default pack uses cached public-source metadata; synthetic fallback uses `fixtures/geospatial_features.json`. |
+| 3D viewer | Real React/Vite + CesiumJS UI | Real terrain/imagery/buildings require `VITE_CESIUM_ION_TOKEN`; no-token mode remains a labelled synthetic fallback. |
+| Geospatial features | Live public, cached-public, or mocked fixture | Live MVP mode queries Planning Data and OSM/Overpass server-side; cached and synthetic fixtures remain fallback paths. |
 | Planning/context notes | Cached-public or synthetic fixture | Default pack uses cached public-safe notes and source metadata; synthetic fallback uses `fixtures/planning_report.txt`. |
 | AWS hosted MVP | Live maintainer deployment | Amplify frontend, API Gateway HTTP API, Lambda/FastAPI backend, Bedrock Claude 3.7 Sonnet, DynamoDB session trace, S3 upload presign, and CloudWatch logs are deployed for access-code teammate testing. |
 | Google Maps / Earth / 3D Tiles | Not used | Kept out of Demo1 to avoid key, cost, licensing, and freshness risk. |
@@ -74,7 +76,7 @@ The hosted product path is documented in [docs/hosted-aws-product.md](docs/hoste
 
 Runtime V3 work is isolated on `feature/durable-runs-tool-loop`. It adds durable run APIs, checkpointed tool execution, polling/reconnect UX, a 3-phase model-budget design, and a location-resolution/confirmation loop before review generation. See [docs/durable-runtime-v2.md](docs/durable-runtime-v2.md).
 
-No AWS, Google Maps, Cesium ion token, or real site data is required.
+For real 3D MVP testing, set `VITE_CESIUM_ION_TOKEN` before building/running the frontend. For live public feature overlays, set `ENABLE_LIVE_MAP_FEATURES=true` on the backend. No Google Maps key is required.
 
 The chat UI uses the public-safe Lambeth fixture only when the prompt references the supported Lambeth / 8 Albert Embankment context or a maintainer explicitly selects that fixture in compatibility paths. Unknown named sites should not use Lambeth without confirmation.
 
@@ -98,7 +100,7 @@ GitHub Actions also runs the backend tests, deterministic evaluation, frontend b
 
 For contribution expectations, safety boundaries, and handoff checklist, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-For backend request/response shape and validation behavior, including `/api/session/start`, `/api/upload-url`, and `/api/chat`, see [docs/api-contract.md](docs/api-contract.md).
+For backend request/response shape and validation behavior, including `/api/session/start`, `/api/upload-url`, `/api/conversation/message`, `/api/chat`, and durable run routes, see [docs/api-contract.md](docs/api-contract.md).
 
 To run the full local verification stack before sharing changes in Codespaces/Linux/macOS:
 
@@ -177,6 +179,42 @@ npm run dev
 ```
 
 Open `http://localhost:5173`.
+
+### Real 3D Map Setup
+
+The default UI can run without a token, but real Cesium terrain, imagery, and OSM Buildings require a Cesium ion token.
+
+1. Create or sign in to a Cesium ion account.
+2. Create an access token in Cesium ion.
+3. Restrict the token to the URLs you will use, such as `http://localhost:5173` and the hosted Amplify URL.
+4. Create a local frontend env file:
+
+```powershell
+cd frontend
+New-Item -ItemType File -Force .env.local
+```
+
+5. Add the token to `frontend/.env.local`:
+
+```env
+VITE_CESIUM_ION_TOKEN=replace-with-your-cesium-ion-token
+```
+
+6. Restart the frontend:
+
+```powershell
+npm.cmd run dev
+```
+
+For live public feature overlays, also start the backend with:
+
+```powershell
+$env:ENABLE_LIVE_MAP_FEATURES="true"
+$env:LIVE_MAP_REQUIRED="false"
+uvicorn app.main:app --reload --port 8000
+```
+
+Do not commit `.env.local` or paste real tokens into README, docs, issues, or commits. The Cesium token is browser-visible public configuration, so use URL restrictions rather than treating it as a private backend secret.
 
 Health check:
 

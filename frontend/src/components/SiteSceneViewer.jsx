@@ -41,14 +41,48 @@ function normalizeAnnotation(annotation, index) {
     title: annotation?.title || annotation?.label || "Review marker",
     confidence: annotation?.confidence || "review",
     sourceType: annotation?.sourceType || annotation?.source || annotation?.dataMode || "source pending",
+    positionMode: annotation?.positionMode || "schematic-offset",
+    layer: annotation?.layer || annotation?.category || "annotations",
     latitude,
     longitude,
   };
 }
 
+function normalizeMapFeature(feature, index) {
+  const centroid = feature?.centroid || {};
+  const latitude = numericValue(centroid.latitude, centroid.lat, feature?.latitude, feature?.lat);
+  const longitude = numericValue(centroid.longitude, centroid.lng, centroid.lon, feature?.longitude, feature?.lng, feature?.lon);
+  if (latitude === null || longitude === null) return null;
+  const geometry = normalizeGeometry(feature?.geometry, longitude, latitude);
+  return {
+    id: feature?.id || `map-feature-${index}`,
+    label: feature?.label || feature?.title || "Live map feature",
+    layer: feature?.layer || feature?.type || "features",
+    type: feature?.type || "feature",
+    provider: feature?.provider || feature?.source || "provider pending",
+    confidence: feature?.confidence || "review",
+    attribution: feature?.attribution,
+    latitude,
+    longitude,
+    geometry,
+  };
+}
+
+function normalizeGeometry(geometry, fallbackLongitude, fallbackLatitude) {
+  if (!geometry || typeof geometry !== "object") {
+    return { type: "Point", coordinates: [fallbackLongitude, fallbackLatitude] };
+  }
+  if (geometry.type === "Point" && Array.isArray(geometry.coordinates)) return geometry;
+  if (geometry.type === "LineString" && Array.isArray(geometry.coordinates)) return geometry;
+  if (geometry.type === "Polygon" && Array.isArray(geometry.coordinates)) return geometry;
+  return { type: "Point", coordinates: [fallbackLongitude, fallbackLatitude] };
+}
+
 function safeStatusClass(status) {
   if (status.includes("terrain-backed")) return "terrain";
+  if (status.includes("live")) return "terrain";
   if (status.includes("synthetic")) return "synthetic";
+  if (status.includes("not configured")) return "unavailable";
   if (status.includes("unavailable")) return "unavailable";
   return "pending";
 }
@@ -75,6 +109,80 @@ async function addIonImageryLayer(viewer) {
   viewer.imageryLayers.removeAll();
   viewer.imageryLayers.addImageryProvider(imageryProvider);
   return true;
+}
+
+async function addOsmBuildingsLayer(viewer) {
+  if (typeof Cesium.createOsmBuildingsAsync !== "function") return false;
+  const buildings = await Cesium.createOsmBuildingsAsync();
+  viewer.scene.primitives.add(buildings);
+  return true;
+}
+
+function featureColor(layer) {
+  if (layer === "buildings") return Cesium.Color.fromCssColorString("#64748b");
+  if (layer === "water") return Cesium.Color.fromCssColorString("#0ea5e9");
+  if (layer === "planning") return Cesium.Color.fromCssColorString("#7c3aed");
+  if (layer === "rail") return Cesium.Color.fromCssColorString("#111827");
+  if (layer === "power") return Cesium.Color.fromCssColorString("#dc2626");
+  return Cesium.Color.fromCssColorString("#0b6f65");
+}
+
+function addMapFeatureEntities(viewer, features, visibleLayers) {
+  features.forEach((feature) => {
+    if (!visibleLayers[feature.layer]) return;
+    const color = featureColor(feature.layer);
+    const description = [
+      `<strong>${feature.label}</strong>`,
+      `Layer: ${feature.layer}`,
+      `Provider: ${feature.provider}`,
+      feature.attribution ? `Attribution: ${feature.attribution}` : null,
+    ].filter(Boolean).join("<br/>");
+    if (feature.geometry.type === "Polygon") {
+      const ring = feature.geometry.coordinates?.[0] || [];
+      if (ring.length >= 3) {
+        viewer.entities.add({
+          name: feature.label,
+          description,
+          polygon: {
+            hierarchy: Cesium.Cartesian3.fromDegreesArray(ring.flat()),
+            material: color.withAlpha(0.22),
+            outline: true,
+            outlineColor: color,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          },
+        });
+      }
+      return;
+    }
+    if (feature.geometry.type === "LineString") {
+      const line = feature.geometry.coordinates || [];
+      if (line.length >= 2) {
+        viewer.entities.add({
+          name: feature.label,
+          description,
+          polyline: {
+            positions: Cesium.Cartesian3.fromDegreesArray(line.flat()),
+            width: feature.layer === "water" ? 4 : 3,
+            material: color.withAlpha(0.86),
+            clampToGround: true,
+          },
+        });
+      }
+      return;
+    }
+    viewer.entities.add({
+      name: feature.label,
+      description,
+      position: Cesium.Cartesian3.fromDegrees(feature.longitude, feature.latitude, 20),
+      point: {
+        pixelSize: 9,
+        color: color.withAlpha(0.9),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      },
+    });
+  });
 }
 
 function addReviewPolygon(viewer, center, terrainBacked) {
@@ -153,21 +261,42 @@ function SyntheticScene({ center, annotations, location, status, reason }) {
   );
 }
 
-export function SiteSceneViewer({ scene, annotations, location }) {
+export function SiteSceneViewer({ scene, annotations, location, mapFeatures, liveFeatureStatus, safety }) {
   const containerRef = useRef(null);
   const [renderError, setRenderError] = useState("");
   const [renderStatus, setRenderStatus] = useState("waiting for confirmed location");
+  const [layerState, setLayerState] = useState({
+    buildings: true,
+    access: true,
+    water: true,
+    planning: true,
+    rail: true,
+    power: true,
+    features: true,
+  });
+  const [providerState, setProviderState] = useState({
+    terrain: false,
+    imagery: false,
+    buildings: false,
+    liveFeatures: false,
+  });
 
   const center = useMemo(() => normalizeCenter(scene), [scene]);
   const validAnnotations = useMemo(
     () => toList(annotations).map(normalizeAnnotation).filter(Boolean),
     [annotations],
   );
+  const validMapFeatures = useMemo(
+    () => toList(mapFeatures).map(normalizeMapFeature).filter(Boolean),
+    [mapFeatures],
+  );
   const skippedAnnotationCount = toList(annotations).length - validAnnotations.length;
   const ionToken = (import.meta.env.VITE_CESIUM_ION_TOKEN || "").trim();
+  const isLiveScene = String(scene?.mode || "").startsWith("live");
 
   useEffect(() => {
     setRenderError("");
+    setProviderState({ terrain: false, imagery: false, buildings: false, liveFeatures: false });
     if (!scene) {
       setRenderStatus("waiting for confirmed location");
       return undefined;
@@ -177,7 +306,7 @@ export function SiteSceneViewer({ scene, annotations, location }) {
       return undefined;
     }
     if (!ionToken) {
-      setRenderStatus("3D fallback: synthetic scene only");
+      setRenderStatus(isLiveScene ? "real 3D not configured: Cesium ion token missing" : "3D fallback: synthetic scene only");
       return undefined;
     }
     if (!containerRef.current || typeof Cesium?.Viewer !== "function") {
@@ -220,13 +349,27 @@ export function SiteSceneViewer({ scene, annotations, location }) {
 
         try {
           await addIonImageryLayer(viewer);
+          setProviderState((current) => ({ ...current, imagery: true }));
         } catch {
           viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#cbd8d2");
         }
 
+        try {
+          const buildingsLoaded = await addOsmBuildingsLayer(viewer);
+          setProviderState((current) => ({ ...current, buildings: buildingsLoaded }));
+        } catch {
+          setProviderState((current) => ({ ...current, buildings: false }));
+        }
+
         if (disposed) return;
         addReviewPolygon(viewer, center, Boolean(terrainProvider));
+        addMapFeatureEntities(viewer, validMapFeatures, layerState);
         addAnnotationMarkers(viewer, validAnnotations);
+        setProviderState((current) => ({
+          ...current,
+          terrain: Boolean(terrainProvider),
+          liveFeatures: validMapFeatures.length > 0,
+        }));
 
         viewer.camera.flyTo({
           destination: Cesium.Cartesian3.fromDegrees(center.longitude, center.latitude, scene?.camera?.heightMeters || 1500),
@@ -237,7 +380,7 @@ export function SiteSceneViewer({ scene, annotations, location }) {
           duration: 0,
         });
 
-        setRenderStatus("terrain-backed scene");
+        setRenderStatus(isLiveScene ? "live terrain-backed scene" : "terrain-backed scene");
       } catch (err) {
         setRenderError(err?.message || "Cesium scene renderer failed.");
         setRenderStatus("renderer unavailable");
@@ -252,7 +395,7 @@ export function SiteSceneViewer({ scene, annotations, location }) {
       disposed = true;
       if (viewer && !viewer.isDestroyed()) viewer.destroy();
     };
-  }, [scene, center, validAnnotations, ionToken]);
+  }, [scene, center, validAnnotations, validMapFeatures, ionToken, layerState, isLiveScene]);
 
   if (!scene) {
     return (
@@ -277,39 +420,105 @@ export function SiteSceneViewer({ scene, annotations, location }) {
 
   if (!ionToken) {
     return (
-      <SyntheticScene
-        center={center}
-        annotations={validAnnotations}
-        location={location}
-        status="3D fallback: synthetic scene only"
-        reason="No Cesium Ion token is configured. This is a synthetic review surface, not real terrain or imagery."
-      />
+      <div className="site-scene-wrapper">
+        <SyntheticScene
+          center={center}
+          annotations={validAnnotations}
+          location={location}
+          status={isLiveScene ? "real 3D not configured: Cesium ion token missing" : "3D fallback: synthetic scene only"}
+          reason={isLiveScene ? "Live map features loaded, but real terrain, imagery, and buildings require VITE_CESIUM_ION_TOKEN." : "No Cesium Ion token is configured. This is a synthetic review surface, not real terrain or imagery."}
+        />
+        <SceneMetaPanel
+          scene={scene}
+          liveFeatureStatus={liveFeatureStatus}
+          mapFeatures={validMapFeatures}
+          providerState={providerState}
+          safety={safety}
+          layerState={layerState}
+          setLayerState={setLayerState}
+        />
+      </div>
     );
   }
 
   if (renderError) {
     return (
-      <SyntheticScene
-        center={center}
-        annotations={validAnnotations}
-        location={location}
-        status="renderer unavailable"
-        reason={`Cesium renderer failed: ${renderError}. Showing synthetic fallback only.`}
-      />
+      <div className="site-scene-wrapper">
+        <SyntheticScene
+          center={center}
+          annotations={validAnnotations}
+          location={location}
+          status="renderer unavailable"
+          reason={`Cesium renderer failed: ${renderError}. Showing synthetic fallback only.`}
+        />
+        <SceneMetaPanel
+          scene={scene}
+          liveFeatureStatus={liveFeatureStatus}
+          mapFeatures={validMapFeatures}
+          providerState={providerState}
+          safety={safety}
+          layerState={layerState}
+          setLayerState={setLayerState}
+        />
+      </div>
     );
   }
 
   return (
     <div className="site-scene-shell">
       <div className={`site-scene-status ${safeStatusClass(renderStatus)}`}>{renderStatus}</div>
+      <SceneMetaPanel
+        scene={scene}
+        liveFeatureStatus={liveFeatureStatus}
+        mapFeatures={validMapFeatures}
+        providerState={providerState}
+        safety={safety}
+        layerState={layerState}
+        setLayerState={setLayerState}
+      />
       <div ref={containerRef} className="site-scene-viewer" />
       <div className="site-scene-caption">
         <strong>{location?.label || "Selected site"}</strong>
-        <span>{validAnnotations.length} mapped review marker(s)</span>
+        <span>{validAnnotations.length} mapped review marker(s); {validMapFeatures.length} live/cached feature(s)</span>
         {skippedAnnotationCount > 0 && <small>{skippedAnnotationCount} marker(s) skipped: missing coordinates</small>}
+        {safety?.allowed === false && <small>Safety blocked: annotations withheld or reduced</small>}
         {(location?.confidence || location?.dataMode) && (
           <small>{[location.confidence, location.dataMode].filter(Boolean).join(" - ")}</small>
         )}
+      </div>
+    </div>
+  );
+}
+
+function SceneMetaPanel({ scene, liveFeatureStatus, mapFeatures, providerState, safety, layerState, setLayerState }) {
+  const status = liveFeatureStatus?.status || scene?.mode || "not-run";
+  const badges = [
+    scene?.mode,
+    providerState.terrain ? "live terrain" : "terrain pending",
+    providerState.imagery ? "live imagery" : "imagery pending",
+    providerState.buildings ? "live OSM buildings" : "buildings pending",
+    mapFeatures.length ? "live features" : "features pending",
+    safety?.allowed === false ? "safety blocked" : null,
+    status === "partial" ? "partial" : null,
+  ].filter(Boolean);
+  return (
+    <div className="site-scene-meta">
+      <div className="site-scene-badges">
+        {badges.map((badge) => (
+          <span className={`site-scene-badge ${safeStatusClass(badge)}`} key={badge}>{badge}</span>
+        ))}
+      </div>
+      <div className="site-scene-layers" aria-label="Map feature layers">
+        {Object.entries(layerState).map(([layer, enabled]) => (
+          <label key={layer}>
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={() => setLayerState((current) => ({ ...current, [layer]: !current[layer] }))}
+            />
+            {layer}
+          </label>
+        ))}
       </div>
     </div>
   );

@@ -634,6 +634,8 @@ function App() {
         location: null,
         scene: null,
         annotations: [],
+        mapFeatures: [],
+        liveFeatureStatus: null,
         hazards: [],
         evidence: [],
         sources: [],
@@ -649,13 +651,15 @@ function App() {
       evidence: [],
       scene: null,
       annotations: [],
+      mapFeatures: [],
+      liveFeatureStatus: null,
       briefing: null,
       safety: { allowed: true, level: "running", message: "New run is executing." },
     });
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`${API_BASE_URL}/api/runs`, {
+      const response = await fetch(`${API_BASE_URL}/api/conversation/message`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -666,10 +670,31 @@ function App() {
           autoStart: true,
         }),
       });
-      if (!response.ok) throw new Error(`Agent run failed (${response.status})`);
-      const status = await response.json();
-      localStorage.setItem("3drams-latest-run", status.runId);
-      applyRunStatus(status);
+      if (!response.ok) throw new Error(`Agent message failed (${response.status})`);
+      const result = await response.json();
+      if (result.run) {
+        localStorage.setItem("3drams-latest-run", result.run.runId);
+        applyRunStatus(result.run);
+      } else {
+        setMessages((current) => [
+          ...current,
+          {
+            id: `assistant-${Date.now()}`,
+            role: "assistant",
+            text: result.assistantMessage || "I answered from the current session context.",
+          },
+        ]);
+        setRun((current) => ({
+          ...(current || {}),
+          runtime: {
+            ...(current?.runtime || {}),
+            ...(result.runtime || {}),
+            activeAgentMode: result.runtime?.agentRuntimeTarget || "agentcore-ready-router",
+            briefingMode: "memory-response",
+          },
+        }));
+        setLoading(false);
+      }
     } catch (err) {
       setError(err.message);
       setLoading(false);
@@ -699,6 +724,8 @@ function App() {
       trace: status.partialUiState?.trace || status.steps || [],
       evidence: status.partialUiState?.evidence || [],
       scene: status.partialUiState?.scene || null,
+      mapFeatures: status.partialUiState?.mapFeatures || [],
+      liveFeatureStatus: status.partialUiState?.liveFeatureStatus || null,
       annotations: status.partialUiState?.annotations || [],
       briefing: status.partialUiState?.briefing || null,
       safety: status.partialUiState?.safety || null,
@@ -914,7 +941,14 @@ function App() {
             <MapPinned size={18} />
             <h2>3D Site Risk Scene</h2>
           </div>
-          <SiteSceneViewer scene={ui.scene} annotations={ui.annotations} location={ui.location} />
+          <SiteSceneViewer
+            scene={ui.scene}
+            annotations={ui.annotations}
+            location={ui.location}
+            mapFeatures={ui.mapFeatures}
+            liveFeatureStatus={ui.liveFeatureStatus}
+            safety={ui.safety}
+          />
         </section>
       </section>
 

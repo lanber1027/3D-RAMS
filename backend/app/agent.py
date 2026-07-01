@@ -123,7 +123,7 @@ def _run_deterministic_response(
             )
         )
 
-    state = _run_core_tool_chain(request, request_summary, fixture_pack, trace)
+    state = _run_core_tool_chain(request, request_summary, fixture_pack, trace, config)
     briefing = state["briefing"]
     evidence = state["evidence"]
     planning_text = state["planning_text"]
@@ -164,6 +164,8 @@ def _run_deterministic_response(
         trace,
         location,
         state["scene"],
+        state["map_features"],
+        state["live_feature_status"],
         hazards,
         state["annotations"],
         briefing,
@@ -182,6 +184,7 @@ def _run_core_tool_chain(
     request_summary: dict[str, Any],
     fixture_pack: dict[str, Any] | None,
     trace: list[dict[str, Any]],
+    config: RuntimeConfig,
 ) -> dict[str, Any]:
     location, step = resolve_location(request, fixture_pack=fixture_pack)
     trace.append(step)
@@ -190,8 +193,16 @@ def _run_core_tool_chain(
         location,
         simulate_failure=bool(request.get("simulateMapFailure")),
         fixture_pack=fixture_pack,
+        config=config,
     )
     trace.append(step)
+    live_feature_status = step.get("output", {}).get("liveFeatureStatus") or {
+        "status": "disabled",
+        "successfulSources": [],
+        "failedSources": [],
+        "featureCount": len(features),
+        "mode": "cached-or-synthetic",
+    }
 
     scene, step = build_scene_config(location, features, fixture_pack=fixture_pack)
     trace.append(step)
@@ -218,6 +229,8 @@ def _run_core_tool_chain(
     return {
         "location": location,
         "features": features,
+        "map_features": features,
+        "live_feature_status": live_feature_status,
         "scene": scene,
         "planning_text": planning_text,
         "hazards": hazards,
@@ -305,7 +318,7 @@ def _run_llm_planner_response(
                 duration_ms=int(metadata.get("latencyMs", 0)),
             )
         )
-        state = _execute_planner_tool_calls(request, request_summary, fixture_pack, tool_calls, trace)
+        state = _execute_planner_tool_calls(request, request_summary, fixture_pack, tool_calls, trace, config)
         model_call_count += 1
         briefing, synth_metadata = generate_bedrock_planner_synthesis(
             config=config,
@@ -375,6 +388,8 @@ def _run_llm_planner_response(
         trace,
         state["location"],
         state["scene"],
+        state.get("map_features", []),
+        state.get("live_feature_status", {}),
         state["hazards"],
         state["annotations"],
         briefing,
@@ -394,6 +409,7 @@ def _execute_planner_tool_calls(
     fixture_pack: dict[str, Any] | None,
     tool_calls: list[dict[str, Any]],
     trace: list[dict[str, Any]],
+    config: RuntimeConfig,
 ) -> dict[str, Any]:
     state: dict[str, Any] = {"executed_tools": []}
     allowlist = {schema["name"] for schema in PLANNER_TOOL_SCHEMAS}
@@ -417,7 +433,7 @@ def _execute_planner_tool_calls(
                 source_ids=["bedrock-briefing"],
             )
         )
-        _run_planner_tool(name, request, request_summary, fixture_pack, state, trace)
+        _run_planner_tool(name, request, request_summary, fixture_pack, state, trace, config)
         state["executed_tools"].append(name)
 
     required = {"location", "features", "scene", "planning_text", "hazards", "annotations", "briefing", "evidence"}
@@ -434,6 +450,7 @@ def _run_planner_tool(
     fixture_pack: dict[str, Any] | None,
     state: dict[str, Any],
     trace: list[dict[str, Any]],
+    config: RuntimeConfig,
 ) -> None:
     if name == "resolve_location":
         location, step = resolve_location(request, fixture_pack=fixture_pack)
@@ -444,8 +461,11 @@ def _run_planner_tool(
             state["location"],
             simulate_failure=bool(request_summary["simulateMapFailure"]),
             fixture_pack=fixture_pack,
+            config=config,
         )
         state["features"] = features
+        state["map_features"] = features
+        state["live_feature_status"] = step.get("output", {}).get("liveFeatureStatus") or {}
     elif name == "build_scene":
         _require_state(state, "location", name)
         _require_state(state, "features", name)
@@ -506,6 +526,8 @@ def _build_response(
     trace: list[dict[str, Any]],
     location: dict[str, Any],
     scene: dict[str, Any],
+    map_features: list[dict[str, Any]],
+    live_feature_status: dict[str, Any],
     hazards: list[dict[str, Any]],
     annotations: list[dict[str, Any]],
     briefing: dict[str, Any],
@@ -532,7 +554,8 @@ def _build_response(
     runtime["plannerToolSchemas"] = PLANNER_TOOL_SCHEMAS if request_summary["agentMode"] == "llm-planner" else []
     runtime["fixturePack"] = fixture_pack["name"] if fixture_pack else None
     runtime["fixturePackMode"] = "cached-public-fixture" if fixture_pack else "synthetic-default"
-    runtime["liveApiCalls"] = False
+    runtime["liveApiCalls"] = bool(live_feature_status.get("successfulSources"))
+    runtime["liveFeatureStatus"] = live_feature_status
     llm_plan = _llm_plan_payload(trace)
     llm_tool_calls = _llm_tool_call_payload(trace)
     model_calls = _model_call_payload(trace)
@@ -550,6 +573,8 @@ def _build_response(
         "fallback": fallback,
         "location": location,
         "scene": scene,
+        "mapFeatures": map_features,
+        "liveFeatureStatus": live_feature_status,
         "hazards": hazards if safety["allowed"] else [],
         "annotations": annotations if safety["allowed"] else [],
         "briefing": briefing,

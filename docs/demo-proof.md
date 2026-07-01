@@ -65,8 +65,8 @@ For repeatable backend proof, run `python scripts/evaluate-demo.py` from the rep
 | --- | --- |
 | Hosted chat API | Real FastAPI endpoints for sessions, uploads, chat, and session trace. |
 | Agent orchestrator | Real FieldBrief orchestrator boundary using deterministic tools now; Strands-ready integration is installed and staged. |
-| Frontend viewer | Real React chat-first UI with token-free local 3D overlay. |
-| Lambeth fixture pack | Cached public-source demo pack with attribution and no live runtime calls. |
+| Frontend viewer | Real React chat-first UI with Cesium terrain/imagery/buildings when `VITE_CESIUM_ION_TOKEN` is configured, plus labelled fallback. |
+| Lambeth fixture pack | Cached public-source demo pack with attribution; live-map MVP mode can add Planning Data and OSM/Overpass overlays after confirmation. |
 | Bedrock briefing | Optional server-side AWS call only when explicitly configured. |
 | Planning portals/PDFs | Not scraped in MVP. |
 | Google 3D / Earth | Not required in MVP. |

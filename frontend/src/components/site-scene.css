@@ -1,3 +1,7 @@
+.site-scene-wrapper {
+  position: relative;
+}
+
 .site-scene-shell {
   position: relative;
   min-height: 676px;
@@ -33,6 +37,64 @@
 .site-scene-status.terrain {
   border-color: #9cc9bc;
   color: #0d665c;
+}
+
+.site-scene-meta {
+  position: absolute;
+  z-index: 4;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+  max-width: min(420px, calc(100% - 170px));
+}
+
+.site-scene-badges,
+.site-scene-layers {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.site-scene-badge,
+.site-scene-layers label {
+  border: 1px solid #ccd8d2;
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #455a54;
+  font-size: 0.68rem;
+  font-weight: 900;
+  line-height: 1;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+  box-shadow: 0 8px 20px rgba(23, 32, 28, 0.08);
+}
+
+.site-scene-badge.terrain {
+  border-color: #9cc9bc;
+  color: #0d665c;
+}
+
+.site-scene-badge.unavailable,
+.site-scene-badge.synthetic {
+  border-color: #e0b76f;
+  color: #8a5600;
+}
+
+.site-scene-layers label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-transform: none;
+}
+
+.site-scene-layers input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
 }
 
 .site-scene-status.synthetic,
@@ -196,6 +258,19 @@
     left: 12px;
     max-width: none;
     border-radius: 8px;
+  }
+
+  .site-scene-meta {
+    top: 54px;
+    right: 12px;
+    left: 12px;
+    max-width: none;
+    justify-items: stretch;
+  }
+
+  .site-scene-badges,
+  .site-scene-layers {
+    justify-content: flex-start;
   }
 
   .site-scene-caption {

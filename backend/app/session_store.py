@@ -10,6 +10,8 @@ from .config import RuntimeConfig
 
 
 _SESSIONS: dict[str, dict[str, Any]] = {}
+_MAX_TURNS = 12
+_MAX_TURN_TEXT = 1200
 
 
 def create_session(*, tester_alias: str | None, access_label: str, config: RuntimeConfig) -> dict[str, Any]:
@@ -24,6 +26,8 @@ def create_session(*, tester_alias: str | None, access_label: str, config: Runti
         "expiresAt": expires_at,
         "runs": [],
         "uploads": [],
+        "conversationTurns": [],
+        "workingMemory": _default_working_memory(),
         "storageMode": "memory",
     }
     if config.dynamodb_session_table:
@@ -53,8 +57,50 @@ def add_upload(session_id: str, upload: dict[str, Any], config: RuntimeConfig) -
 def add_run(session_id: str, run_summary: dict[str, Any], config: RuntimeConfig) -> None:
     session = get_session(session_id, config)
     session["runs"].append(run_summary)
+    memory = session.setdefault("workingMemory", _default_working_memory())
+    memory["activeRunId"] = run_summary.get("runId") or memory.get("activeRunId")
+    memory["latestRunStatus"] = run_summary.get("status") or memory.get("latestRunStatus")
+    memory["latestSafetyLevel"] = run_summary.get("safetyLevel") or memory.get("latestSafetyLevel")
+    memory["latestBriefingMode"] = run_summary.get("briefingMode") or memory.get("latestBriefingMode")
     session["updatedAt"] = _now_iso()
     _persist_session(session, config)
+
+
+def add_conversation_turn(
+    session_id: str,
+    *,
+    role: str,
+    text: str,
+    config: RuntimeConfig,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    session = get_session(session_id, config)
+    turns = session.setdefault("conversationTurns", [])
+    turns.append(
+        {
+            "role": role,
+            "text": _truncate(text),
+            "metadata": _safe_metadata(metadata or {}),
+            "timestamp": _now_iso(),
+        }
+    )
+    del turns[:-_MAX_TURNS]
+    memory = session.setdefault("workingMemory", _default_working_memory())
+    if role == "assistant":
+        memory["latestAssistantMessage"] = _truncate(text)
+    elif role == "user":
+        memory["latestUserMessage"] = _truncate(text)
+    session["updatedAt"] = _now_iso()
+    _persist_session(session, config)
+
+
+def update_working_memory(session_id: str, config: RuntimeConfig, **updates: Any) -> dict[str, Any]:
+    session = get_session(session_id, config)
+    memory = session.setdefault("workingMemory", _default_working_memory())
+    memory.update(_safe_metadata(updates))
+    session["updatedAt"] = _now_iso()
+    _persist_session(session, config)
+    return memory
 
 
 def public_session(session: dict[str, Any]) -> dict[str, Any]:
@@ -67,6 +113,8 @@ def public_session(session: dict[str, Any]) -> dict[str, Any]:
         "expiresAt": session.get("expiresAt"),
         "runs": session.get("runs", []),
         "uploads": [_stored_upload(upload) for upload in session.get("uploads", [])],
+        "conversationTurns": session.get("conversationTurns", []),
+        "workingMemory": session.get("workingMemory", _default_working_memory()),
         "storageMode": session.get("storageMode", "memory"),
     }
 
@@ -77,6 +125,32 @@ def _stored_upload(upload: dict[str, Any]) -> dict[str, Any]:
         for key, value in upload.items()
         if key not in {"uploadUrl", "fields"}
     }
+
+
+def _default_working_memory() -> dict[str, Any]:
+    return {
+        "runtimeTarget": "agentcore-ready",
+        "runtimeStatus": "lambda-adapter-active",
+        "activeRunId": None,
+        "latestRunStatus": None,
+        "latestAssistantMessage": None,
+        "latestUserMessage": None,
+        "pendingUserAction": None,
+        "confirmedLocation": None,
+        "latestLocationResolution": None,
+        "latestReviewSummary": None,
+        "latestSafetyLevel": None,
+        "latestBriefingMode": None,
+    }
+
+
+def _truncate(text: str) -> str:
+    return " ".join(str(text).split())[:_MAX_TURN_TEXT]
+
+
+def _safe_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    blocked = {"accessCode", "accessToken", "token", "secret", "uploadUrl", "fields"}
+    return {key: value for key, value in metadata.items() if key not in blocked}
 
 
 def _persist_session(session: dict[str, Any], config: RuntimeConfig) -> None:

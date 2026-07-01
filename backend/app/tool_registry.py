@@ -90,7 +90,9 @@ def _load_geospatial_features(context: dict[str, Any]) -> dict[str, Any]:
         fixture_pack=context.get("fixturePack"),
     )
     context["features"] = features
-    return {"features": features, "trace": trace}
+    context["mapFeatures"] = features
+    context["liveFeatureStatus"] = trace.get("output", {}).get("liveFeatureStatus") or {}
+    return {"features": features, "mapFeatures": features, "liveFeatureStatus": context["liveFeatureStatus"], "trace": trace}
 
 
 def _build_scene_config(context: dict[str, Any]) -> dict[str, Any]:

@@ -8,7 +8,7 @@ Default local 3D-RAMS behavior remains no-AWS:
 
 - `ENABLE_BEDROCK=false`;
 - cached public and synthetic fixtures only;
-- no live planning portal, Google Maps, or Cesium ion dependency;
+- no live planning portal or Google Maps dependency; live 3D map testing separately requires a restricted Cesium ion browser token;
 - deterministic briefing fallback available for every run.
 
 Hosted teammate testing is live through the Amplify/API Gateway/Lambda path. Bedrock is still server-side only and requires the shared access code before any model call.

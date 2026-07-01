@@ -69,11 +69,22 @@ DYNAMODB_SESSION_TABLE=<your-session-table>
 S3_UPLOAD_BUCKET=<your-private-upload-bucket>
 UPLOAD_RETENTION_DAYS=7
 SESSION_RETENTION_DAYS=7
+ENABLE_AGENTCORE_RUNTIME=false
+AGENTCORE_RUNTIME_ARN=
+ENABLE_AGENTCORE_MEMORY=false
+AGENTCORE_MEMORY_ID=
 ENABLE_GEOAPIFY_GEOCODING=false
 GEOAPIFY_API_KEY=
+ENABLE_LIVE_MAP_FEATURES=true
+LIVE_MAP_REQUIRED=false
+LIVE_FEATURE_RADIUS_METERS=350
+OVERPASS_API_URL=https://overpass-api.de/api/interpreter
+PLANNING_DATA_API_BASE=https://www.planning.data.gov.uk
 ```
 
 For local development with AWS credentials, you may also use `AWS_PROFILE=<your-local-profile>`. Do not set local profile names or AWS credentials in hosted frontend code.
+
+The AgentCore variables are feature gates for the selected runtime path. Keep them disabled until you have created and reviewed your own AgentCore resources, IAM permissions, retention policy, and observability setup. The default deployed path remains the Lambda/FastAPI adapter with bounded session memory.
 
 ## Frontend Environment Variable
 
@@ -81,9 +92,11 @@ Set this before building the frontend for deployment:
 
 ```bash
 VITE_API_BASE_URL=https://your-api-gateway-url.example.com
+VITE_CESIUM_ION_TOKEN=<restricted-public-cesium-ion-token>
 ```
 
 Leave `VITE_API_BASE_URL` blank only for local development where the Vite dev proxy is configured.
+`VITE_CESIUM_ION_TOKEN` is browser-visible public configuration. Use a minimum-scope Cesium ion token and restrict allowed URLs to your local and hosted frontend origins.
 
 ## Access-Code Hash Pattern
 

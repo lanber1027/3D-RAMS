@@ -8,7 +8,7 @@ Hosted MVP URL:
 
 Ask the maintainer for the private test access code. Do not post the access code in GitHub issues, chat screenshots, public docs, or demo recordings.
 
-3D-RAMS turns a confirmed site location into an inspectable 3D pre-visit briefing pack. The default UI uses the cached `public-lambeth-thames` fixture pack for a Lambeth / Thames public-data example anchored on 8 Albert Embankment. Unknown named sites now enter a V3.2 location-resolution loop first; the reliable MVP path is postcode/outcode or latitude/longitude. The agent shows a source-labelled candidate card with map preview and location context, then waits for confirmation before map, evidence, risk, or briefing tools run. Name-only random sites may show a provisional checklist based on the user-described site/activity type, but that is not a site-specific evidence-backed finding. It does not call live Planning Data, OpenStreetMap, Environment Agency, Lambeth, TfL, Google, OS services, or Geoapify during the default demo.
+3D-RAMS turns a confirmed site location into an inspectable 3D pre-visit briefing pack. The default UI uses the cached `public-lambeth-thames` fixture pack for a Lambeth / Thames public-data example anchored on 8 Albert Embankment. Unknown named sites now enter a V3.2 location-resolution loop first; the reliable MVP path is postcode/outcode or latitude/longitude. The agent shows a source-labelled candidate card with map preview and location context, then waits for confirmation before map, evidence, risk, or briefing tools run. Name-only random sites may show a provisional checklist based on the user-described site/activity type, but that is not a site-specific evidence-backed finding. The default deterministic demo does not call live Planning Data, OpenStreetMap, Environment Agency, Lambeth, TfL, Google, OS services, or Geoapify; live-map MVP testing enables Planning Data plus OSM/Overpass adapters explicitly.
 
 1. shared-code session start;
 2. natural-language site visit request;
@@ -209,7 +209,7 @@ This check starts local backend and frontend preview servers, then shuts them do
 | `frontend` | The website you click on. |
 | `backend` | The hosted/local agent API that receives chat messages and returns briefing data. |
 | `fixtures` | Public-safe cached and synthetic demo data, not client data. |
-| `fixtures/public-lambeth-thames` | Cached public-source fixture pack and attribution files for the Lambeth / Thames example. Runtime makes no live public-data calls. |
+| `fixtures/public-lambeth-thames` | Cached public-source fixture pack and attribution files for the Lambeth / Thames example. Runtime makes no live public-data calls unless `ENABLE_LIVE_MAP_FEATURES=true`. |
 | `scripts/start-dev.sh` | One-command startup script for Codespaces. |
 | `scripts/check-demo.sh` / `scripts/check-demo.ps1` | One-command local verification scripts for tests, evaluation, frontend build, and runtime smoke. |
 | `scripts/smoke-runtime.py` | No-AWS HTTP smoke test for backend health, agent run, and frontend preview shell. |
@@ -310,6 +310,7 @@ Expected response:
 | Local frontend opens but run fails | Backend is not running or port `8000` is not forwarded. | Start the backend, check `/health`, and reload the frontend. |
 | Codespaces/local frontend cannot reach backend | Startup script did not start the backend or proxy is not active. | Stop the script, run `bash scripts/start-dev.sh` again, check `/health`, and confirm ports `8000` and `5173` are forwarded. |
 | `npm` command fails in PowerShell | Local execution policy blocks `npm.ps1`. | Use `npm.cmd run dev` or `npm.cmd run build`. |
-| Cesium scene looks blank or slow | Browser/GPU/network constraints in the test environment. | Reload once, try another browser, and still capture whether briefing/evidence/trace worked. |
+| Cesium scene looks blank or slow | Missing `VITE_CESIUM_ION_TOKEN`, browser/GPU limits, provider outage, or blocked network calls. | Confirm the build has a restricted Cesium ion token, reload once, try another browser, and still capture whether briefing/evidence/trace worked. |
+| Live feature overlays are missing | `ENABLE_LIVE_MAP_FEATURES` is disabled, live public APIs timed out, or fallback mode was used. | Check the visualizer/live feature status, then rerun with coordinates/postcode and record provider failures rather than treating missing overlays as confirmed absence of risk. |
 | Planning-related hazards are missing | The prompt did not resolve to the cached public example or the source was unavailable. | Use the 8 Albert Embankment prompt for the deterministic happy path. |
 | Output sounds too authoritative | Demo copy or narration may be overstating the boundary. | Flag it in feedback; the intended boundary is human-review briefing only. |

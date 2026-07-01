@@ -11,7 +11,8 @@ The frontend never calls Bedrock directly. Hosted model calls, uploads, session 
 | `GET` | `/health` | Confirms the backend is reachable. |
 | `POST` | `/api/session/start` | Validates the shared access code and starts a tester session. |
 | `POST` | `/api/upload-url` | Registers PDF/image evidence and returns an S3 presigned upload URL when hosted storage is configured. |
-| `POST` | `/api/chat` | Runs the chat-first hosted agent workflow. |
+| `POST` | `/api/conversation/message` | Primary frontend route. Applies bounded session memory and guarded routing, then either answers from context or starts a durable run. |
+| `POST` | `/api/chat` | Compatibility chat route retained for hosted smoke/regression checks. |
 | `POST` | `/api/runs` | V3.2 branch: creates a durable run and returns run status/checkpoints. |
 | `GET` | `/api/runs/{runId}` | V3.2 branch: returns latest durable run status, partial/final UI state, location-resolution state, and trace. |
 | `POST` | `/api/runs/{runId}/confirm-location` | V3.2 branch: confirms a source-labelled location candidate and continues the review workflow. |
@@ -60,7 +61,32 @@ Response:
 
 If `S3_UPLOAD_BUCKET` is configured, the response includes a short-lived presigned `uploadUrl`. In local mode it returns `local-mock://...` so the UI and tests can exercise the flow without S3.
 
-## Chat Request
+## Conversation Message
+
+`POST /api/conversation/message`
+
+This is the primary frontend route for the AgentCore-ready rebuild slice. It keeps Bedrock and tools server-side, applies deterministic guards first, uses bounded session memory for follow-up/status messages, and starts the durable run workflow only when the message is a new site task.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `sessionId` | string | Required tester session id. |
+| `message` | string | Natural-language user message. Follow-ups such as `What do you mean?` should be resolved against the current session instead of becoming a fake site name. |
+| `uploadedFileIds` | string array | Optional ids returned by `/api/upload-url`. |
+| `useBedrock` | boolean | Requests server-side Bedrock where enabled by environment. |
+
+Important response fields:
+
+| Field | Meaning |
+| --- | --- |
+| `action` | `started_run` or `answered_from_memory`. |
+| `route` | Router decision, such as `new_or_guarded_run`, `follow_up`, or `status`. |
+| `assistantMessage` | Natural-language response. |
+| `run` | Durable run status object when a new run was created; absent when the message was answered from memory. |
+| `runtime` | AgentCore-ready runtime contract, adapter status, guard policy, memory mode, and Bedrock/AWS metadata. |
+
+The current implementation stores bounded recent turns and structured working memory in the session record. It must not store raw access codes, credentials, uploaded file contents, or private client material.
+
+## Compatibility Chat Request
 
 `POST /api/chat`
 

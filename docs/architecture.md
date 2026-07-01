@@ -6,12 +6,13 @@ This document is the public, living architecture reference for the 3D-RAMS hoste
 
 ## Runtime Modes
 
-The milestone now has three public-safe runtime interpretations:
+The milestone now has four public-safe runtime interpretations:
 
 - `Current hosted Bedrock planner`: access-code gated hosted path where Lambda calls Bedrock server-side. The model plans/synthesizes, but tools, evidence, and safety remain explicit and inspectable.
+- `AgentCore-ready conversation runtime`: selected rebuild path. The current implementation keeps Lambda/FastAPI as the active adapter while adding bounded session memory, a guards-first conversation router, and an AgentCore integration boundary.
 - `Current no-AWS fallback`: deterministic local path when Bedrock is disabled, unavailable, rejected by safety, or fails.
 - `Hosted product path`: browser user opens a hosted URL, starts a shared-code test session, chats with the pre-visit agent, and receives chat, 3D scene, evidence, trace, confidence, and safety output.
-- `Future AWS services`: Cognito, Bedrock Guardrails, AgentCore Observability, CloudWatch dashboards, API throttling/WAF, and richer live data adapters are production-shaped follow-on stages, not current MVP claims.
+- `Future AWS services`: managed AgentCore Runtime/Memory activation, Cognito, Bedrock Guardrails, AgentCore Observability, CloudWatch dashboards, API throttling/WAF, and richer live data adapters are production-shaped follow-on stages, not current MVP claims.
 
 ## Hosted Chat-To-Brief Flow
 
@@ -34,6 +35,44 @@ flowchart LR
     Lambda --> TraceStore["DynamoDB session trace"]
     Lambda --> Logs["CloudWatch structured logs"]
     Lambda --> UIState["Chat, 3D scene, evidence, trace, safety, review mode"]
+    UIState --> UI
+```
+
+## AgentCore-Ready Conversation And Memory Boundary
+
+The active hosted route keeps a thin Lambda/FastAPI adapter in front of the agent so access-code checks, CORS, upload presigns, and response shaping stay outside the model path. The selected rebuild path is AgentCore-compatible: the router, memory contract, tool loop, evaluator, and safety gate are explicit boundaries that can move behind AgentCore Runtime after the AWS feasibility gate passes.
+
+```mermaid
+flowchart LR
+    User["Browser user"] --> UI["Hosted React chat UI"]
+    UI --> APIGW["API Gateway"]
+    APIGW --> Lambda["Lambda / FastAPI adapter"]
+
+    Lambda --> Guards["Deterministic guards: auth, safety, location gate, budgets"]
+    Guards --> Router{"Conversation router"}
+
+    subgraph Memory["Bounded session memory"]
+        Turns["Recent turns"]
+        Working["Working memory: active run, pending action, confirmed site"]
+        Trace["Trace/evidence summary"]
+    end
+
+    subgraph AgentCoreTarget["AgentCore runtime boundary - selected path"]
+        Planner["Planner"]
+        ToolLoop["Allowlisted tool loop"]
+        Reasoner["Risk reasoner"]
+        Evaluator{"Evaluator / repair loop <= 3"}
+        Compiler["Review-pack compiler"]
+        Safety["Final safety gate"]
+    end
+
+    Router -->|"follow-up/status"| Memory
+    Memory -->|"context answer"| UI
+    Router -->|"new site task"| Planner
+    Planner --> ToolLoop --> Reasoner --> Compiler --> Evaluator
+    Evaluator -->|"repair needed"| ToolLoop
+    Evaluator -->|"pass or stop"| Safety
+    Safety --> UIState["Chat, map, risks, evidence, trace, safety"]
     UIState --> UI
 ```
 
@@ -158,7 +197,7 @@ sequenceDiagram
     A->>Obs: Emit trace, latency, status, and evidence ids
 ```
 
-The hosted MVP runs Bedrock server-side through Lambda when access-code validation succeeds. Local and CI modes can still run without Bedrock, and deterministic briefing remains the fallback. The hosted planner/synthesis path is capped at 2 model calls per run. The default UI uses the cached `public-lambeth-thames` pack anchored on 8 Albert Embankment. Runtime does not call live Planning Data, OpenStreetMap, Environment Agency, Lambeth, TfL, Google, or OS services.
+The hosted MVP runs Bedrock server-side through Lambda when access-code validation succeeds. Local and CI modes can still run without Bedrock, and deterministic briefing remains the fallback. The hosted planner/synthesis path is capped at 2 model calls per run. The default UI uses the cached `public-lambeth-thames` pack anchored on 8 Albert Embankment. Live-map MVP mode can call Planning Data and OSM/Overpass server-side after location confirmation; Google Maps/Earth and broad live planning-portal scraping remain out of scope.
 
 V3.1 adds a pre-tool intent and location-evidence gate. The parser extracts clean site label, coordinate, postcode/outcode, nearest-town clue, site/activity type, visit date, and unsafe certification/approval intent. The resolver is fixture-first plus server-side Postcodes.io for postcode/outcode clues. Broad site-name web geocoding is deferred; the system must not ask the LLM to invent coordinates. Name-only random sites can show a clearly labelled provisional checklist, but site-specific scene/evidence/briefing output requires confirmed location evidence.
 
@@ -221,8 +260,8 @@ The safety gate is deliberately visible. Judges and teammates should be able to 
 | Agent loop | Python backend | Real deterministic code plus optional Bedrock planner/synthesis | Tool timeline, LLM-first explainer, and trace | Bedrock model/tool planning | Model variability and evaluation |
 | Public fixture pack | `fixtures/public-lambeth-thames` | Cached public-source metadata and attribution files | Source register, evidence, trace, briefing | S3 source pack plus source registry | Source freshness, licence handling, and overclaiming |
 | Request state | Browser form payload | Real | Run overview | DynamoDB run/session record | Data privacy and retention |
-| 3D viewer | React/Vite + CesiumJS | Real token-free local scene plus overlay | 3D scene | Static frontend plus API runtime | Performance on low-power devices |
-| Geospatial features | Synthetic fixture or cached public pack | Mocked, cached-public, or fallback | Sources and annotations | S3 source object plus live geospatial APIs | Licensing, freshness, key management |
+| 3D viewer | React/Vite + CesiumJS | Real Cesium terrain/imagery/buildings when `VITE_CESIUM_ION_TOKEN` is configured; labelled synthetic fallback otherwise | 3D scene | Static frontend plus API runtime | Performance, token URL restrictions, and provider availability |
+| Geospatial features | Live Planning Data + OSM/Overpass when enabled; synthetic/cached fallback otherwise | Live public, cached-public, mocked, or fallback | Sources, live feature layers, and annotations | Lambda/FastAPI live adapters plus S3 fallback source packs | Licensing, freshness, rate limits, key management |
 | Planning context | Synthetic fixture or cached public pack | Synthetic, cached-public, or unavailable | Sources, evidence, briefing limits | S3 documents plus Bedrock extraction | Scraping reliability and citations |
 | Bedrock planner/synthesis | Amazon Bedrock through Lambda in hosted mode | Live hosted MVP call with deterministic fallback | Runtime mode, LLM-first panel, trace, and briefing | Evaluated Bedrock adapter with CloudWatch traces | Cost, model access, latency, and fallback quality |
 | Safety gate | Python rules | Real Demo1 policy | Safety pill and visualizer | Guardrails plus human review queue | Overclaiming or hidden unsafe edge cases |

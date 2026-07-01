@@ -7,10 +7,11 @@ from .access import validate_access_code
 from .agent import run_site_briefing
 from .chat_agent import run_fieldbrief_chat
 from .config import RuntimeConfig
+from .conversation_router import handle_conversation_message
 from .durable_runner import cancel_durable_run, confirm_location_for_run, create_durable_run, read_durable_run
 from .hosted_logging import log_event, now_ms
-from .models import ChatRequest, HealthResponse, LocationConfirmRequest, RunCreateRequest, SessionStartRequest, SiteBriefRequest, UploadUrlRequest
-from .session_store import create_session, get_session, public_session
+from .models import ChatRequest, ConversationMessageRequest, HealthResponse, LocationConfirmRequest, RunCreateRequest, SessionStartRequest, SiteBriefRequest, UploadUrlRequest
+from .session_store import add_conversation_turn, create_session, get_session, public_session, update_working_memory
 from .upload_service import create_upload_target
 
 
@@ -125,6 +126,31 @@ def chat(payload: ChatRequest) -> dict[str, object]:
     return result
 
 
+@app.post("/api/conversation/message")
+def conversation_message(payload: ConversationMessageRequest) -> dict[str, object]:
+    started = now_ms()
+    config = RuntimeConfig.from_env(request_bedrock=payload.useBedrock)
+    get_session(payload.sessionId, config)
+    result = handle_conversation_message(
+        session_id=payload.sessionId,
+        message=payload.message,
+        uploaded_file_ids=payload.uploadedFileIds,
+        use_bedrock=payload.useBedrock,
+        config=config,
+    )
+    run = result.get("run") or {}
+    log_event(
+        "conversation_message",
+        sessionId=payload.sessionId,
+        route=result.get("route"),
+        action=result.get("action"),
+        runId=run.get("runId"),
+        runStatus=run.get("status"),
+        latencyMs=now_ms() - started,
+    )
+    return result
+
+
 @app.post("/api/runs", status_code=202)
 def create_run(payload: RunCreateRequest) -> dict[str, object]:
     started = now_ms()
@@ -185,6 +211,28 @@ def confirm_run_location(run_id: str, payload: LocationConfirmRequest) -> dict[s
         candidateId=payload.candidateId,
         latencyMs=now_ms() - started,
     )
+    assistant_text = result.get("result", {}).get("assistantMessage") or f"Location confirmed. Run {result.get('status')} at {result.get('currentStep')}."
+    if result.get("sessionId"):
+        add_conversation_turn(
+            result["sessionId"],
+            role="assistant",
+            text=assistant_text,
+            metadata={"route": "confirm_location", "runId": run_id, "runStatus": result.get("status")},
+            config=config,
+        )
+        update_working_memory(
+            result["sessionId"],
+            config,
+            activeRunId=run_id,
+            latestRunStatus=result.get("status"),
+            pendingUserAction=None if result.get("status") == "completed" else "wait_for_agent_run",
+            confirmedLocation=result.get("confirmedLocation") or result.get("locationResolution", {}).get("confirmedLocation"),
+            latestReviewSummary={
+                "runId": run_id,
+                "status": result.get("status"),
+                "headline": result.get("result", {}).get("briefing", {}).get("headline"),
+            },
+        )
     return result
 
 
