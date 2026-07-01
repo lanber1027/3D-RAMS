@@ -1,0 +1,3 @@
+display_name: Shea Symphony Doctor
+short_description: Diagnose 3D-RAMS blockers and propose one concrete repair path.
+default_prompt: Inspect a 3D-RAMS issue, PR, local failure, or workflow blocker; prefer the suite CLI if it exists, but note it is unavailable here and use local checks plus gh readbacks to recommend or execute the safest bounded repair.

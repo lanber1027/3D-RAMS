@@ -1,0 +1,3 @@
+display_name: Shea Symphony Issue Forge Reflect
+short_description: Reflect 3D-RAMS work into backlog candidates or promote candidates.
+default_prompt: Reflect recent 3D-RAMS context into backlog candidates, or promote a named candidate through discussion; prefer the suite CLI if it exists, but note it is unavailable here and use gh/local evidence with explicit confirmation.

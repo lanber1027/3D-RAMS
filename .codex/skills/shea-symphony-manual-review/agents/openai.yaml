@@ -1,0 +1,3 @@
+display_name: Shea Symphony Manual Review
+short_description: Run an evidence-backed manual review pass for 3D-RAMS.
+default_prompt: Review one 3D-RAMS issue or PR independently; prefer the suite CLI if it exists, but note it is unavailable here and use gh, diff inspection, local checks, and a findings-first review handoff.

@@ -1,0 +1,3 @@
+display_name: Shea Symphony Manual Main
+short_description: Run a scoped 3D-RAMS implementation session and hand off to review.
+default_prompt: Work one 3D-RAMS implementation task from issue or prompt through scoped changes and verification; prefer the suite CLI if it exists, but note it is unavailable here and approximate the lane with git, gh, local checks, and a clear review handoff.

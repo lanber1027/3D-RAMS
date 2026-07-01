@@ -1,0 +1,3 @@
+display_name: Shea Symphony Human Review
+short_description: Brief 3D-RAMS Human Review, guide UAT, and wait for confirmation.
+default_prompt: Brief one 3D-RAMS issue or PR for Human Review in the operator's language, inspect review evidence and PR state, guide UAT one step at a time, and wait for explicit confirmation before any GitHub write; prefer the suite CLI if it exists, but note it is unavailable here.

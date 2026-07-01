@@ -1,0 +1,3 @@
+display_name: Shea Symphony Manual Merge
+short_description: Handle approved 3D-RAMS merge-lane work conservatively.
+default_prompt: Inspect one approved 3D-RAMS PR, verify merge readiness and evidence, repair only mechanical merge-lane blockers when safe, and merge or route conservatively; prefer the suite CLI if it exists, but note it is unavailable here.

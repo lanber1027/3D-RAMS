@@ -1,0 +1,3 @@
+display_name: Shea Symphony Issue Forge
+short_description: Shape and create 3D-RAMS issues through a conversational flow.
+default_prompt: Create a 3D-RAMS issue from rough intent. Discuss execution-critical details first, draft a quality-gated issue body, prefer the suite CLI if it exists, but note it is unavailable here and create with gh only after explicit confirmation.
