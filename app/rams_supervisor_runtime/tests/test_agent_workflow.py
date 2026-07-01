@@ -77,7 +77,10 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertEqual(result["runtime"]["plannerMode"], "deterministic")
         self.assertEqual(result["runtime"]["activeAgentMode"], "deterministic-planner")
         self.assertEqual(result["runtime"]["modelCallCount"], 0)
-        self.assertEqual(result["llmPlan"]["initialParallelGroups"], ["geospatial_subagent", "planning_subagent"])
+        self.assertEqual(
+            result["llmPlan"]["initialParallelGroups"],
+            ["geospatial_subagent", "planning_subagent", "material_subagent"],
+        )
         self.assertEqual(result["llmPlan"]["reportParallelGroups"], ["annotation_subagent", "briefing_subagent"])
         self.assertEqual(result["reasoning"]["mode"], "deterministic")
         self.assertIn("reportFit", result["reasoning"])
@@ -360,11 +363,15 @@ class SiteBriefingAgentTests(unittest.TestCase):
 
         self.assertEqual(
             dispatch_steps["dispatch_parallel_tool_groups"]["output"]["groups"],
-            ["geospatial_subagent", "planning_subagent"],
+            ["geospatial_subagent", "planning_subagent", "material_subagent"],
         )
         self.assertEqual(
             dispatch_steps["dispatch_parallel_tool_groups"]["output"]["harnesses"]["geospatial_subagent"],
             "rams_geospatial_harness",
+        )
+        self.assertEqual(
+            dispatch_steps["dispatch_parallel_tool_groups"]["output"]["harnesses"]["material_subagent"],
+            "rams_material_harness",
         )
         self.assertEqual(
             dispatch_steps["dispatch_parallel_report_groups"]["output"]["groups"],
@@ -386,12 +393,13 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertEqual(result["runtime"]["harnessOutputSchemaVersion"], HARNESS_OUTPUT_SCHEMA_VERSION)
         self.assertTrue(result["runtime"]["harnessContract"]["contractCompliant"])
         self.assertEqual(result["runtime"]["harnessContract"]["fallbackCount"], 0)
-        self.assertEqual(len(result["subagentOutputs"]), 6)
+        self.assertEqual(len(result["subagentOutputs"]), 7)
         self.assertEqual(
             result["runtime"]["harnessContract"]["observedSubagents"],
             [
                 "geospatial_subagent",
                 "planning_subagent",
+                "material_subagent",
                 "hazard_subagent",
                 "open_web_subagent",
                 "annotation_subagent",

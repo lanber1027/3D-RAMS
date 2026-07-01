@@ -165,7 +165,7 @@ def scenario_definitions() -> list[dict[str, Any]]:
                 path_equals("architecture.runOverview.fixturePack", "public-lambeth-thames"),
                 path_equals("runtime.harnessOutputSchemaVersion", HARNESS_OUTPUT_SCHEMA_VERSION),
                 path_equals("runtime.harnessContract.contractCompliant", True),
-                list_length_at_least("subagentOutputs", 5),
+                list_length_at_least("subagentOutputs", 7),
             ],
         },
         {
