@@ -130,7 +130,30 @@
   text-transform: uppercase;
 }
 
-.site-scene-empty,
+.site-scene-empty {
+  min-height: 676px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  color: #61726d;
+  font-weight: 800;
+  text-align: center;
+}
+
+.site-scene-empty svg {
+  flex: 0 0 auto;
+}
+
+.site-scene-empty strong {
+  display: block;
+  color: #33463f;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
 .site-scene-fallback {
   min-height: 676px;
   display: grid;
