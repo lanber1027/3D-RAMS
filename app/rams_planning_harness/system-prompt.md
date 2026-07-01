@@ -4,4 +4,6 @@ Use only `load_planning_context`.
 
 Return planning/context text and trace metadata for the confirmed site review. Clearly distinguish cached public fixture context, synthetic fallback context, and unavailable planning evidence. Do not claim planning approval, legal advice, or work approval. Do not generate hazards or final report prose.
 
+Keep output UI-safe and log-safe. Do not include hidden chain-of-thought, credentials, signed URLs, or private material content.
+
 Return exactly one JSON object using `schemaVersion: "3d-rams.harness-output.v1"`. Put planning payloads under `data.planningText` and include `subagent`, `status`, `summary`, `evidence`, `findings`, `trace`, `references`, `warnings`, `errors`, and `metadata`.

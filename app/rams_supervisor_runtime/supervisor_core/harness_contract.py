@@ -17,7 +17,22 @@ DOMAIN_DATA_KEYS = {
     "hazard_subagent": ["hazards"],
     "annotation_subagent": ["annotations"],
     "briefing_subagent": ["briefing", "evidence", "bedrockStatus", "bedrockFallbackReason"],
-    "review_guardrail": ["safety"],
+    "review_guardrail": ["safety", "reviewDecision"],
+}
+
+COMMON_ENVELOPE_KEYS = {
+    "schemaVersion",
+    "subagent",
+    "status",
+    "summary",
+    "data",
+    "evidence",
+    "findings",
+    "trace",
+    "references",
+    "warnings",
+    "errors",
+    "metadata",
 }
 
 
@@ -47,7 +62,7 @@ def build_harness_output(
         envelope_metadata.update(metadata)
     envelope_metadata.setdefault("generatedAt", now)
 
-    return {
+    return flatten_harness_output({
         "schemaVersion": HARNESS_OUTPUT_SCHEMA_VERSION,
         "subagent": {
             "name": group,
@@ -64,7 +79,7 @@ def build_harness_output(
         "warnings": warnings or [],
         "errors": errors or [],
         "metadata": envelope_metadata,
-    }
+    })
 
 
 def validate_harness_output(
@@ -146,6 +161,14 @@ def validate_harness_output(
 
 def harness_data(envelope: dict[str, Any]) -> dict[str, Any]:
     return _dict(envelope.get("data"))
+
+
+def flatten_harness_output(envelope: dict[str, Any]) -> dict[str, Any]:
+    flattened = dict(envelope)
+    for key, value in harness_data(envelope).items():
+        if key not in COMMON_ENVELOPE_KEYS:
+            flattened.setdefault(key, value)
+    return flattened
 
 
 def harness_fallback_issues(envelopes: list[dict[str, Any]]) -> list[dict[str, Any]]:

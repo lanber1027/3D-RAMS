@@ -150,6 +150,10 @@ class AgentCoreHarnessInvokerTests(unittest.TestCase):
 
         self.assertEqual(result["schemaVersion"], HARNESS_OUTPUT_SCHEMA_VERSION)
         self.assertEqual(result["data"]["planningText"], "Reviewed cached planning context.")
+        self.assertEqual(result["planningText"], "Reviewed cached planning context.")
+        self.assertFalse(
+            any(step.get("name") == "agentcore_harness_schema_fallback" for step in result.get("trace", []))
+        )
         self.assertEqual(len(client.calls), 2)
         self.assertEqual(
             client.calls[0]["harnessArn"],
