@@ -158,7 +158,7 @@ def _append_full_report_link(reply: str, response_text: str, session_id: str) ->
 
 
 def _looks_like_confirmation(prompt: str) -> bool:
-    normalized = prompt.strip().lower()
+    normalized = re.sub(r"^(?:@\S+\s+)+", "", prompt.strip().lower())
     return bool(
         normalized in {"yes", "yes please", "confirm", "confirmed", "launch", "go", "go ahead"}
         or re.search(r"^(please\s+)?(confirm|confirmed|proceed|go ahead|launch)\b", normalized)

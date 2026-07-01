@@ -50,6 +50,14 @@ class HostedAdapterPayloadTests(unittest.TestCase):
 
         self.assertFalse(payload["confirmedByUser"])
 
+    def test_agent_mention_before_confirmation_is_confirmation(self):
+        payload = self.hosted_adapter._entry_turn_payload(
+            "@3d-rams Confirmed. Proceed with the review-required workflow.",
+            "agentverse-session",
+        )
+
+        self.assertTrue(payload["confirmedByUser"])
+
     def test_case_id_from_prompt(self):
         self.assertEqual(
             self.hosted_adapter._case_id_from_prompt("Show report /case/case_ec2310c77382 please"),
