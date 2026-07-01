@@ -923,6 +923,38 @@ textarea {
   margin-top: 3px;
 }
 
+.conversation-observability {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  border: 1px solid #d5e3dc;
+  border-radius: 8px;
+  background: #f4fbf8;
+  padding: 10px;
+}
+
+.conversation-observability div {
+  display: grid;
+  gap: 4px;
+}
+
+.conversation-observability span {
+  color: #5f706a;
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.conversation-observability strong {
+  overflow-wrap: anywhere;
+}
+
+.conversation-observability p {
+  margin: 0;
+  color: #526861;
+  font-size: 0.9rem;
+}
+
 .agent-turns {
   display: grid;
   gap: 8px;
@@ -1115,6 +1147,7 @@ textarea {
   .badge-grid,
   .agent-state-grid,
   .agent-evaluation-strip,
+  .conversation-observability,
   .runtime-strip,
   .run-status-bar {
     grid-template-columns: 1fr;

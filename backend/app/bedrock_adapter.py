@@ -308,6 +308,7 @@ def generate_bedrock_conversation_orchestration(
                 "For name-only sites without postcode/coordinate, recommend new_run so the backend can create a gated clarification/provisional checklist.",
                 "For postcode or latitude/longitude, recommend new_run so the backend can create a location confirmation candidate.",
                 "For unsafe certification, approval, or emergency requests, do not start tools; explain the safety boundary.",
+                "If should_start_run is false, assistant_message must not say you will gather, fetch, search, check, run tools, or prepare a pack. Ask for the missing trusted location or answer conversationally instead.",
             ],
             "message": message[:1200],
             "structured_intent": {

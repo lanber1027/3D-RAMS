@@ -368,6 +368,72 @@ class DurableRunApiTests(unittest.TestCase):
         self.assertNotIn("provide_information", response["assistantMessage"])
         self.assertIn("site-visit preparation", response["assistantMessage"])
 
+    def test_conversation_does_not_promise_tool_work_without_trusted_location(self):
+        model_promises = [
+            "I can help with your visit to a park in Brighton. Let me gather some information about this location.",
+            "I’m going to fetch the local context for this location.",
+            "I can gather the relevant site information now.",
+            "I am checking available evidence for this site.",
+        ]
+        for model_promise in model_promises:
+            with self.subTest(model_promise=model_promise), EnvPatch(
+                ENABLE_BEDROCK="true",
+                APP_ACCESS_TOKEN_HASH=None,
+                DURABLE_RUN_PROCESS_INLINE="true",
+            ), patch(
+                "app.conversation_router.generate_bedrock_conversation_orchestration",
+                return_value=(
+                    {
+                        "route": "conversation",
+                        "assistantMessage": model_promise,
+                        "shouldStartRun": False,
+                        "pendingUserAction": "provide_location_detail",
+                        "reason": "Needs trusted location evidence.",
+                    },
+                    {"provider": "bedrock", "phase": "conversation-orchestrator", "modelCallCount": 1},
+                ),
+            ):
+                session = self._session()
+                response = self.client.post(
+                    "/api/conversation/message",
+                    json={
+                        "sessionId": session["sessionId"],
+                        "message": "There is a park close to where I live in Brighton, I need to visit there",
+                        "useBedrock": True,
+                    },
+                ).json()
+                session_state = self.client.get(f"/api/session/{session['sessionId']}").json()
+
+            self.assertEqual(response["action"], "answered_from_memory")
+            self.assertEqual(response["route"], "conversation")
+            self.assertEqual(session_state["runs"], [])
+            self.assertNotIn("gather", response["assistantMessage"].lower())
+            self.assertNotIn("fetch", response["assistantMessage"].lower())
+            self.assertNotIn("checking", response["assistantMessage"].lower())
+            self.assertIn("have not started map, evidence, risk, or briefing tools", response["assistantMessage"])
+            self.assertFalse(response["observability"]["toolsStarted"])
+            self.assertEqual(response["observability"]["phase"], "waiting_for_user")
+            self.assertIn("toolsStarted", response["trace"][0]["output"])
+            self.assertEqual(response["modelCalls"][0]["phase"], "conversation-orchestrator")
+
+    def test_status_response_includes_observability_when_no_run_exists(self):
+        with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None, DURABLE_RUN_PROCESS_INLINE="true"):
+            session = self._session()
+            response = self.client.post(
+                "/api/conversation/message",
+                json={
+                    "sessionId": session["sessionId"],
+                    "message": "status",
+                    "useBedrock": False,
+                },
+            ).json()
+
+        self.assertEqual(response["action"], "answered_from_memory")
+        self.assertEqual(response["route"], "status")
+        self.assertFalse(response["observability"]["toolsStarted"])
+        self.assertIn("No tools started", response["observability"]["noToolReason"])
+        self.assertEqual(response["trace"][0]["output"]["route"], "status")
+
     def test_conversation_stale_unknown_pending_action_is_removed_from_llm_context(self):
         from app.config import RuntimeConfig
         from app.session_store import llm_session_context, update_working_memory
@@ -508,6 +574,40 @@ class DurableRunApiTests(unittest.TestCase):
         self.assertEqual(response["route"], "conversation")
         self.assertIn("cannot certify RAMS", response["assistantMessage"])
         self.assertEqual(session_state["runs"], [])
+
+    def test_unsafe_conversation_does_not_mix_refusal_with_tool_promise(self):
+        with EnvPatch(ENABLE_BEDROCK="true", APP_ACCESS_TOKEN_HASH=None, DURABLE_RUN_PROCESS_INLINE="true"), patch(
+            "app.conversation_router.generate_bedrock_conversation_orchestration",
+            return_value=(
+                {
+                    "route": "conversation",
+                    "assistantMessage": "I cannot certify RAMS, but I can gather and check the site context for you.",
+                    "shouldStartRun": False,
+                    "pendingUserAction": "provide_safe_site_visit_request",
+                    "reason": "Unsafe request.",
+                },
+                {"provider": "bedrock", "phase": "conversation-orchestrator", "modelCallCount": 1},
+            ),
+        ):
+            session = self._session()
+            response = self.client.post(
+                "/api/conversation/message",
+                json={
+                    "sessionId": session["sessionId"],
+                    "message": "Please certify RAMS and approve work today.",
+                    "useBedrock": True,
+                },
+            ).json()
+            session_state = self.client.get(f"/api/session/{session['sessionId']}").json()
+
+        self.assertEqual(response["action"], "answered_from_memory")
+        self.assertEqual(response["route"], "conversation")
+        self.assertEqual(session_state["runs"], [])
+        self.assertIn("cannot certify RAMS", response["assistantMessage"])
+        self.assertIn("have not started map, evidence, risk, or briefing tools", response["assistantMessage"])
+        self.assertNotIn("can gather", response["assistantMessage"].lower())
+        self.assertNotIn("check the site context", response["assistantMessage"].lower())
+        self.assertFalse(response["observability"]["toolsStarted"])
 
     def test_conversation_bedrock_orchestrator_failure_falls_back_to_guarded_run(self):
         with EnvPatch(ENABLE_BEDROCK="true", APP_ACCESS_TOKEN_HASH=None, DURABLE_RUN_PROCESS_INLINE="true"), patch(

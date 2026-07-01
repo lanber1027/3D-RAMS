@@ -59,7 +59,7 @@ function pendingActionCopy(action) {
   return mapping[action] || "No user action is pending.";
 }
 
-function AgentStatePanel({ sessionState, runStatus, run }) {
+function AgentStatePanel({ sessionState, runStatus, run, conversationDebug }) {
   const memory = sessionState?.workingMemory || {};
   const turns = toList(sessionState?.conversationTurns);
   const recentTurns = turns.slice(-5);
@@ -116,6 +116,26 @@ function AgentStatePanel({ sessionState, runStatus, run }) {
               <strong>{displayValue(evaluationScores[key], "n/a")}</strong>
             </div>
           ))}
+        </div>
+      )}
+
+      {conversationDebug && (
+        <div className="conversation-observability">
+          <div>
+            <span>Current activity</span>
+            <strong>{displayValue(conversationDebug.observability?.phase || conversationDebug.route)}</strong>
+            <p>{displayValue(conversationDebug.observability?.noToolReason, "Tools may be running in the active run trace.")}</p>
+          </div>
+          <div>
+            <span>Tools started</span>
+            <strong>{conversationDebug.observability?.toolsStarted ? "yes" : "no"}</strong>
+            <p>Route: {displayValue(conversationDebug.route)} / model calls: {displayValue(conversationDebug.observability?.modelCalls, "0")}</p>
+          </div>
+          <div>
+            <span>Latest visible step</span>
+            <strong>{displayValue(conversationDebug.trace?.[0]?.name || conversationDebug.observability?.modelPhase, "conversation")}</strong>
+            <p>{displayValue(conversationDebug.trace?.[0]?.output?.orchestratorReason, "No extra model reason returned.")}</p>
+          </div>
         </div>
       )}
 
@@ -693,6 +713,7 @@ function App() {
   const [run, setRun] = useState(null);
   const [runStatus, setRunStatus] = useState(null);
   const [sessionState, setSessionState] = useState(null);
+  const [conversationDebug, setConversationDebug] = useState(null);
   const [uploads, setUploads] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -750,9 +771,19 @@ function App() {
     const userMessage = { id: `user-${Date.now()}`, role: "user", text: prompt.trim() };
     setMessages((current) => [...current, userMessage]);
     setPrompt("");
+    setConversationDebug({
+      route: "pending",
+      observability: {
+        phase: "sending_to_backend",
+        toolsStarted: false,
+        modelCalls: 0,
+        noToolReason: "Waiting for the server-side conversation router to classify this turn.",
+      },
+      trace: [],
+    });
     setRun({
       runId: "pending",
-      assistantMessage: "Run queued.",
+      assistantMessage: "Message sent to the server-side agent router.",
       uiState: {
         location: null,
         scene: null,
@@ -763,13 +794,13 @@ function App() {
         evidence: [],
         sources: [],
         briefing: null,
-        safety: { allowed: true, level: "running", message: "New run is executing." },
+        safety: { allowed: true, level: "routing", message: "Conversation router is deciding whether tools should run." },
         trace: [],
         architecture: null,
         locationResolution: null,
-        reviewMode: "new run in progress",
+        reviewMode: "conversation routing in progress",
       },
-      runtime: { activeAgentMode: "queued", briefingMode: "not-run" },
+      runtime: { activeAgentMode: "conversation-router", briefingMode: "not-run" },
       trace: [],
       evidence: [],
       scene: null,
@@ -777,7 +808,7 @@ function App() {
       mapFeatures: [],
       liveFeatureStatus: null,
       briefing: null,
-      safety: { allowed: true, level: "running", message: "New run is executing." },
+      safety: { allowed: true, level: "routing", message: "Conversation router is deciding whether tools should run." },
     });
     setLoading(true);
     setError("");
@@ -796,10 +827,33 @@ function App() {
       if (!response.ok) throw new Error(`Agent message failed (${response.status})`);
       const result = await response.json();
       if (result.run) {
+        setConversationDebug({
+          route: result.route,
+          observability: {
+            phase: "durable_run_started",
+            toolsStarted: true,
+            modelCalls: result.run.modelCallsUsed ?? 0,
+            noToolReason: null,
+          },
+          trace: result.run.steps || result.trace || [],
+        });
         localStorage.setItem("3drams-latest-run", result.run.runId);
         applyRunStatus(result.run);
         await refreshSessionState(session.sessionId);
       } else {
+        const nextConversationDebug = {
+          route: result.route,
+          observability: result.observability || {
+            phase: "conversation_only",
+            toolsStarted: false,
+            modelCalls: 0,
+            noToolReason: "No durable run was started for this turn.",
+          },
+          trace: result.trace || [],
+          modelCalls: result.modelCalls || [],
+        };
+        setConversationDebug(nextConversationDebug);
+        setRunStatus(null);
         setMessages((current) => [
           ...current,
           {
@@ -810,11 +864,20 @@ function App() {
         ]);
         setRun((current) => ({
           ...(current || {}),
+          assistantMessage: result.assistantMessage || "I answered from the current session context.",
+          uiState: {
+            ...(current?.uiState || {}),
+            safety: { allowed: true, level: "conversation", message: "No site-review tools ran for this chat turn." },
+            trace: result.trace || [],
+            reviewMode: "conversation only",
+          },
+          trace: result.trace || [],
+          modelCalls: result.modelCalls || [],
           runtime: {
             ...(current?.runtime || {}),
             ...(result.runtime || {}),
-            activeAgentMode: result.runtime?.agentRuntimeTarget || "agentcore-ready-router",
-            briefingMode: "memory-response",
+            activeAgentMode: result.runtime?.agentRuntimeTarget || "conversation-router",
+            briefingMode: "conversation-only",
           },
         }));
         await refreshSessionState(session.sessionId);
@@ -1073,7 +1136,12 @@ function App() {
         confirmingLocation={confirmingLocation}
         run={run}
       />
-      <AgentStatePanel sessionState={sessionState} runStatus={runStatus} run={run} />
+      <AgentStatePanel
+        sessionState={sessionState}
+        runStatus={runStatus}
+        run={run}
+        conversationDebug={conversationDebug}
+      />
 
       <section className="product-grid">
         <ChatPanel

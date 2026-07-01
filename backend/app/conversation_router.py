@@ -10,6 +10,7 @@ from .config import RuntimeConfig
 from .durable_runner import create_durable_run, read_durable_run
 from .session_store import add_conversation_turn, get_session, llm_session_context, update_working_memory
 from .site_intent import parse_site_intent
+from .tools import trace_step
 
 
 _TERMINAL_STATUSES = {
@@ -91,6 +92,13 @@ _HELP_PHRASES = {
     "what can you do",
     "what do you need",
 }
+_TOOL_PROMISE_RE = re.compile(
+    r"\b(?:let me|i(?:'|’)?m|i am|i(?:'|’)?ll|i will|i can(?: now)?|i(?:'|’)?d like to)\b"
+    r".{0,48}\b"
+    r"(?:gather|fetch|look\s*up|check|search|run|start|collect|find|review|assess|prepare|investigate|analy[sz]e|compile|generate)"
+    r"(?:ing)?\b",
+    re.IGNORECASE,
+)
 
 
 def handle_conversation_message(
@@ -123,11 +131,11 @@ def handle_conversation_message(
     )
     route = _validated_route(orchestration, deterministic_route, memory, intent)
     if route in {"conversation", "greeting", "help"}:
-        return _orchestrated_conversation_response(session_id, route, orchestration, memory, config)
+        return _orchestrated_conversation_response(session_id, route, orchestration, memory, intent, config)
     if route == "status":
-        return _status_response(session_id, memory, config)
+        return _status_response(session_id, memory, intent, config)
     if route == "follow_up":
-        return _memory_response(session_id, cleaned, memory, config, orchestration=orchestration)
+        return _memory_response(session_id, cleaned, memory, intent, config, orchestration=orchestration)
     if route == "confirm_by_chat":
         return _confirm_by_chat_response(session_id, memory, config)
     if route == "reject_location":
@@ -317,14 +325,19 @@ def _orchestrated_conversation_response(
     route: str,
     orchestration: dict[str, Any] | None,
     memory: dict[str, Any],
+    intent: dict[str, Any],
     config: RuntimeConfig,
 ) -> dict[str, Any]:
     text = (
         (orchestration or {}).get("assistantMessage")
         or _deterministic_conversation_copy(route, memory)
     )
-    text = _sanitize_assistant_copy(text)
     pending_action = (orchestration or {}).get("pendingUserAction")
+    memory_for_sanitize = dict(memory)
+    if _is_known_pending_action(pending_action):
+        memory_for_sanitize["pendingUserAction"] = pending_action
+    text = _sanitize_assistant_copy(text, route=route, memory=memory_for_sanitize, intent=intent, tools_started=False)
+    observability = _conversation_observability(route, orchestration, intent, memory, tools_started=False)
     add_conversation_turn(
         session_id,
         role="assistant",
@@ -332,6 +345,7 @@ def _orchestrated_conversation_response(
         metadata={
             "route": route,
             "conversationOrchestrator": _orchestration_metadata(orchestration),
+            "observability": observability,
         },
         config=config,
     )
@@ -343,6 +357,9 @@ def _orchestrated_conversation_response(
         "action": "answered_from_memory",
         "route": route,
         "assistantMessage": text,
+        "observability": observability,
+        "trace": _conversation_trace(route, orchestration, intent, memory, observability),
+        "modelCalls": _conversation_model_calls(orchestration),
         "runtime": _runtime_contract(
             config,
             "bedrock-conversation-orchestrator" if orchestration and not orchestration.get("failed") else "lambda-adapter-active",
@@ -403,7 +420,7 @@ def _looks_like_correction(lower: str) -> bool:
     )
 
 
-def _status_response(session_id: str, memory: dict[str, Any], config: RuntimeConfig) -> dict[str, Any]:
+def _status_response(session_id: str, memory: dict[str, Any], intent: dict[str, Any], config: RuntimeConfig) -> dict[str, Any]:
     run = _safe_read_run(memory.get("activeRunId"))
     if run:
         status = run.get("status")
@@ -423,22 +440,40 @@ def _status_response(session_id: str, memory: dict[str, Any], config: RuntimeCon
             config=config,
         )
         update_working_memory(session_id, config, latestRunStatus=status)
+        tools_started = status in {"queued", "running", "completed"}
+        observability = _conversation_observability("status", None, intent, memory, tools_started=tools_started)
+        if tools_started:
+            observability["phase"] = f"run_{status}"
+            observability["noToolReason"] = None
         return {
             "action": "answered_from_memory",
             "route": "status",
             "assistantMessage": text,
             "run": run,
+            "observability": observability,
+            "trace": _conversation_trace("status", None, intent, memory, observability),
+            "modelCalls": [],
             "runtime": _runtime_contract(config, "lambda-adapter-active"),
         }
     text = "I do not have an active run in this session yet. Send a site visit request with a postcode or latitude/longitude to begin."
     add_conversation_turn(session_id, role="assistant", text=text, metadata={"route": "status"}, config=config)
-    return {"action": "answered_from_memory", "route": "status", "assistantMessage": text, "runtime": _runtime_contract(config, "lambda-adapter-active")}
+    observability = _conversation_observability("status", None, intent, memory, tools_started=False)
+    return {
+        "action": "answered_from_memory",
+        "route": "status",
+        "assistantMessage": text,
+        "observability": observability,
+        "trace": _conversation_trace("status", None, intent, memory, observability),
+        "modelCalls": [],
+        "runtime": _runtime_contract(config, "lambda-adapter-active"),
+    }
 
 
 def _memory_response(
     session_id: str,
     message: str,
     memory: dict[str, Any],
+    intent: dict[str, Any],
     config: RuntimeConfig,
     *,
     orchestration: dict[str, Any] | None = None,
@@ -446,9 +481,21 @@ def _memory_response(
     latest = memory.get("latestAssistantMessage")
     pending = memory.get("pendingUserAction")
     if orchestration and orchestration.get("assistantMessage"):
-        text = _sanitize_assistant_copy(orchestration["assistantMessage"])
+        text = _sanitize_assistant_copy(
+            orchestration["assistantMessage"],
+            route="follow_up",
+            memory=memory,
+            intent=intent,
+            tools_started=False,
+        )
     elif latest:
-        latest_safe = _sanitize_assistant_copy(latest)
+        latest_safe = _sanitize_assistant_copy(
+            latest,
+            route="follow_up",
+            memory=memory,
+            intent=intent,
+            tools_started=False,
+        )
         text = (
             "I was referring to the previous step in this same session: "
             f"{latest_safe} "
@@ -458,6 +505,7 @@ def _memory_response(
         text = _pending_action_copy(pending)
     else:
         text = "I do not have enough prior context in memory yet. Please send the site location and planned visit activity."
+    observability = _conversation_observability("follow_up", orchestration, intent, memory, tools_started=False)
     add_conversation_turn(
         session_id,
         role="assistant",
@@ -466,6 +514,7 @@ def _memory_response(
             "route": "follow_up",
             "followUpPrompt": message[:120],
             "conversationOrchestrator": _orchestration_metadata(orchestration),
+            "observability": observability,
         },
         config=config,
     )
@@ -473,6 +522,9 @@ def _memory_response(
         "action": "answered_from_memory",
         "route": "follow_up",
         "assistantMessage": text,
+        "observability": observability,
+        "trace": _conversation_trace("follow_up", orchestration, intent, memory, observability),
+        "modelCalls": _conversation_model_calls(orchestration),
         "runtime": _runtime_contract(config, "lambda-adapter-active"),
     }
 
@@ -494,14 +546,136 @@ def _pending_action_copy(action: Any) -> str:
     )
 
 
-def _sanitize_assistant_copy(text: str) -> str:
+def _sanitize_assistant_copy(
+    text: str,
+    *,
+    route: str | None = None,
+    memory: dict[str, Any] | None = None,
+    intent: dict[str, Any] | None = None,
+    tools_started: bool = False,
+) -> str:
     scrubbed = str(text)
     for action in _known_pending_actions():
         if action in scrubbed:
             scrubbed = scrubbed.replace(action, _pending_action_copy(action))
     if re.search(r"\b(?:provide|confirm|answer|wait|start|reject)_[a-z0-9_]+\b", scrubbed):
         return "I can help with site-visit preparation. Please provide a UK postcode or latitude/longitude and the planned visit activity."
+    if (intent or {}).get("unsafeIntent"):
+        if not tools_started and _TOOL_PROMISE_RE.search(scrubbed):
+            return (
+                "I cannot certify RAMS, approve work, or provide emergency guidance. "
+                "I have not started map, evidence, risk, or briefing tools for this unsafe request. "
+                "I can only help with a non-certified pre-visit review pack for human review if you provide a safe site-visit request."
+            )
+        return scrubbed
+    if not tools_started and _TOOL_PROMISE_RE.search(scrubbed):
+        return _no_tool_started_copy(route or "conversation", memory or {}, intent or {})
     return scrubbed
+
+
+def _no_tool_started_copy(route: str, memory: dict[str, Any], intent: dict[str, Any]) -> str:
+    if memory.get("pendingUserAction"):
+        return (
+            "I have not started map, evidence, risk, or briefing tools yet. "
+            f"{_pending_action_copy(memory['pendingUserAction'])}"
+        )
+    site_hint = intent.get("siteName") or intent.get("namedSiteHint")
+    activity_hint = ", plus the planned visit activity" if not intent.get("activities") else ""
+    if site_hint and not intent.get("hasLocationEvidence"):
+        return (
+            f"I can help with that site visit, but I have not started map, evidence, risk, or briefing tools yet. "
+            f"Please provide a trusted UK postcode or latitude/longitude for {site_hint}{activity_hint}, "
+            "or a specific public source for the intended location."
+        )
+    if route == "greeting":
+        return "Hello. Tell me the site postcode or latitude/longitude and the planned visit activity, and I can prepare a pre-visit review pack."
+    return "I can help with site-visit preparation. Please provide a trusted UK postcode or latitude/longitude and the planned visit activity before I run tools."
+
+
+def _conversation_observability(
+    route: str,
+    orchestration: dict[str, Any] | None,
+    intent: dict[str, Any],
+    memory: dict[str, Any],
+    *,
+    tools_started: bool,
+) -> dict[str, Any]:
+    pending = memory.get("pendingUserAction") or (orchestration or {}).get("pendingUserAction")
+    has_location_evidence = bool(intent.get("hasLocationEvidence"))
+    has_site_signal = bool(intent.get("namedSiteHint") or has_location_evidence)
+    if tools_started:
+        reason = "Backend durable run accepted; tool trace is attached to the run."
+        phase = "running_tools"
+    elif pending:
+        reason = f"Waiting for user action: {pending}."
+        phase = "waiting_for_user"
+    elif not has_location_evidence and has_site_signal:
+        reason = "No tools started because the message has a site hint but no trusted postcode, coordinate, or confirmed candidate."
+        phase = "waiting_for_location_evidence"
+    elif not has_site_signal:
+        reason = "No tools started because this was handled as conversation, greeting, help, status, or follow-up."
+        phase = "conversation_only"
+    else:
+        reason = "No tools started for this guarded conversation turn."
+        phase = "conversation_only"
+    metadata = (orchestration or {}).get("metadata") or {}
+    return {
+        "phase": phase,
+        "route": route,
+        "toolsStarted": tools_started,
+        "modelCalls": metadata.get("modelCallCount", 0),
+        "modelPhase": metadata.get("phase"),
+        "provider": metadata.get("provider"),
+        "pendingUserAction": pending if _is_known_pending_action(pending) else None,
+        "noToolReason": None if tools_started else reason,
+        "hasLocationEvidence": has_location_evidence,
+        "hasSiteSignal": has_site_signal,
+    }
+
+
+def _conversation_trace(
+    route: str,
+    orchestration: dict[str, Any] | None,
+    intent: dict[str, Any],
+    memory: dict[str, Any],
+    observability: dict[str, Any],
+) -> list[dict[str, Any]]:
+    metadata = (orchestration or {}).get("metadata") or {}
+    return [
+        trace_step(
+            "conversation_orchestrator",
+            "ok" if orchestration and not orchestration.get("failed") else "fallback",
+            "Classified the chat turn and decided whether a durable tool run should start.",
+            output={
+                "route": route,
+                "toolsStarted": observability["toolsStarted"],
+                "noToolReason": observability.get("noToolReason"),
+                "pendingUserAction": observability.get("pendingUserAction"),
+                "hasLocationEvidence": observability.get("hasLocationEvidence"),
+                "hasSiteSignal": observability.get("hasSiteSignal"),
+                "modelPhase": metadata.get("phase"),
+                "modelCallCount": metadata.get("modelCallCount", 0),
+                "orchestratorReason": (orchestration or {}).get("reason"),
+                "activeRunId": memory.get("activeRunId"),
+                "siteName": intent.get("siteName"),
+            },
+            source_ids=["bedrock-conversation-orchestrator" if orchestration else "deterministic-router"],
+        )
+    ]
+
+
+def _conversation_model_calls(orchestration: dict[str, Any] | None) -> list[dict[str, Any]]:
+    metadata = (orchestration or {}).get("metadata") or {}
+    count = metadata.get("modelCallCount", 0)
+    if not count:
+        return []
+    return [
+        {
+            "phase": metadata.get("phase") or "conversation-orchestrator",
+            "provider": metadata.get("provider") or "bedrock",
+            "modelCallCount": count,
+        }
+    ]
 
 
 def _is_known_pending_action(action: Any) -> bool:
@@ -651,12 +825,16 @@ def _latest_review_summary(run: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _runtime_contract(config: RuntimeConfig, status: str) -> dict[str, Any]:
+    agentcore_configured = bool(config.agentcore_runtime_enabled and config.agentcore_runtime_arn)
     return {
-        "agentRuntimeTarget": "agentcore",
+        "agentRuntimeTarget": "agentcore" if agentcore_configured else "lambda",
         "agentRuntimeStatus": status,
         "adapter": "api-gateway-lambda-fastapi",
         "guardsFirst": True,
         "memoryMode": "bounded-session-working-memory",
         "bedrockEnabled": config.bedrock_enabled,
         "awsRegion": config.aws_region,
+        "agentCoreRuntimeEnabled": config.agentcore_runtime_enabled,
+        "agentCoreMemoryEnabled": config.agentcore_memory_enabled,
+        "agentCoreStatus": "configured" if agentcore_configured else "not-enabled-lambda-adapter",
     }
