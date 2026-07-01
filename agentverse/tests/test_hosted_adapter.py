@@ -58,6 +58,15 @@ class HostedAdapterPayloadTests(unittest.TestCase):
 
         self.assertTrue(payload["confirmedByUser"])
 
+    def test_single_pending_intake_falls_back_when_session_changes(self):
+        self.hosted_adapter._PENDING_INTAKES.clear()
+        self.hosted_adapter._PENDING_INTAKES["first-session"] = {"locationText": "48 Quernmore Road"}
+
+        self.assertEqual(
+            self.hosted_adapter._pending_intake("second-session"),
+            {"locationText": "48 Quernmore Road"},
+        )
+
     def test_case_id_from_prompt(self):
         self.assertEqual(
             self.hosted_adapter._case_id_from_prompt("Show report /case/case_ec2310c77382 please"),

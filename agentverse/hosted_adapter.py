@@ -46,8 +46,10 @@ def invoke_agentcore(prompt: str, sender: str, message: Optional[ChatMessage] = 
     user_id = f"agentverse-{sender[-48:]}"
     case_id = _case_id_from_prompt(prompt)
     payload = _report_lookup_payload(case_id, session_id) if case_id else _entry_turn_payload(prompt, session_id)
-    if payload["confirmedByUser"] and session_id in _PENDING_INTAKES:
-        payload["intake"] = _PENDING_INTAKES[session_id]
+    if payload["confirmedByUser"]:
+        pending_intake = _pending_intake(session_id)
+        if pending_intake:
+            payload["intake"] = pending_intake
 
     response_text = invoke_runtime_text(
         runtime_arn=AGENTCORE_RUNTIME_ARN,
@@ -164,6 +166,14 @@ def _looks_like_confirmation(prompt: str) -> bool:
         or re.search(r"^(please\s+)?(confirm|confirmed|proceed|go ahead|launch)\b", normalized)
         or re.search(r"\b(confirm(ed)? and launch|please launch)\b", normalized)
     )
+
+
+def _pending_intake(session_id: str):
+    if session_id in _PENDING_INTAKES:
+        return _PENDING_INTAKES[session_id]
+    if len(_PENDING_INTAKES) == 1:
+        return next(iter(_PENDING_INTAKES.values()))
+    return None
 
 
 def _remember_pending_intake(session_id: str, response_text: str) -> None:
