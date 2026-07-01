@@ -29,6 +29,7 @@ The repository now has one supervisor Harness config plus specialist Harness sub
 | `rams_supervisor_harness` | `app/rams_supervisor_harness/` | Target Harness for supervisor orchestration and review workflow. |
 | `rams_geospatial_harness` | `app/rams_geospatial_harness/` | Geospatial specialist for location resolution, geospatial context, and scene configuration. |
 | `rams_planning_harness` | `app/rams_planning_harness/` | Planning/document context specialist. |
+| `rams_material_harness` | `app/rams_material_harness/` | ASI/ASI:ONE-authorized material reference ingestion specialist. |
 | `rams_hazard_harness` | `app/rams_hazard_harness/` | Hazard and RAMS-scoping evidence specialist. |
 | `rams_annotation_harness` | `app/rams_annotation_harness/` | 3D annotation payload specialist. |
 | `rams_briefing_harness` | `app/rams_briefing_harness/` | Evidence-backed briefing specialist. |

@@ -10,7 +10,6 @@ from rams_agent_tools.fixtures import load_fixture_pack
 from rams_agent_tools.tools import (
     architecture_snapshot,
     harness_for_group,
-    ingest_material_references,
     normalize_request,
     safety_gate,
     source_register,
@@ -97,15 +96,32 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
     trace.extend(_trace_steps(geospatial_result.get("trace"), "geospatial_subagent"))
     trace.extend(_trace_steps(planning_result.get("trace"), "planning_subagent"))
 
-    material_result = ingest_material_references(
+    trace.append(
+        trace_step(
+            "dispatch_material_subagent",
+            "ok",
+            "Supervisor dispatched authorized material-reference ingestion through the material Harness subagent.",
+            {
+                "mode": subagents.execution_mode,
+                "groups": ["material_subagent"],
+                "harnesses": {"material_subagent": harness_for_group("material_subagent")},
+                "plannerMode": planner_result["activeAgentMode"],
+                "caseId": case_id,
+                "referenceCount": len(request_summary.get("materials") or []),
+            },
+        )
+    )
+    material_output = subagents.invoke_material(
         request.get("materials"),
         case_id=case_id,
         upstream_context=upstream_context,
     )
-    trace.extend(_trace_steps(material_result.get("trace"), "material_ingestion"))
-    material_findings = _dict_list(material_result.get("findings"), "material_ingestion", "findings")
-    material_evidence = _dict_list(material_result.get("evidence"), "material_ingestion", "evidence")
-    material_sources = _dict_list(material_result.get("sources"), "material_ingestion", "sources")
+    subagent_outputs.append(material_output)
+    material_result = harness_data(material_output)
+    trace.extend(_trace_steps(material_output.get("trace"), "material_subagent"))
+    material_findings = _dict_list(material_result.get("findings"), "material_subagent", "findings")
+    material_evidence = _dict_list(material_result.get("evidence"), "material_subagent", "evidence")
+    material_sources = _dict_list(material_result.get("sources"), "material_subagent", "sources")
 
     sequential_groups = subagent_plan["sequentialGroups"]
     evidence_groups = [

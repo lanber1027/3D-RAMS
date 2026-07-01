@@ -22,6 +22,7 @@ from rams_agent_tools.tools import (
     load_planning_context,
     resolve_location,
     safety_gate,
+    sanitize_material_references,
     search_open_web_signals,
     trace_step,
 )
@@ -61,6 +62,15 @@ class SubagentInvoker(Protocol):
         features: list[dict[str, Any]],
         *,
         fixture_pack: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        ...
+
+    def invoke_material(
+        self,
+        materials: Any,
+        *,
+        case_id: str | None,
+        upstream_context: dict[str, Any] | None,
     ) -> dict[str, Any]:
         ...
 
@@ -171,6 +181,29 @@ class DirectSubagentInvoker:
             trace=trace,
             warnings=_warnings_from_trace(trace),
             metadata=_harness_metadata({}, fixture_pack),
+        )
+
+    def invoke_material(
+        self,
+        materials: Any,
+        *,
+        case_id: str | None,
+        upstream_context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        result = ingest_material_references(materials, case_id=case_id, upstream_context=upstream_context)
+        raw_trace = result.get("trace")
+        trace = raw_trace if isinstance(raw_trace, list) else [raw_trace] if isinstance(raw_trace, dict) else []
+        return build_harness_output(
+            "material_subagent",
+            status="warning" if result.get("status") == "warning" else "ok",
+            summary="Validated authorized material references and produced safe material evidence summaries.",
+            data={key: value for key, value in result.items() if key != "trace"},
+            evidence=_list(result.get("evidence")),
+            findings=_list(result.get("findings")),
+            trace=trace,
+            references=_list(result.get("citations")),
+            warnings=_warnings_from_trace(trace),
+            metadata={"caseId": case_id, "fixturePack": None, "mode": result.get("mode", "fixture")},
         )
 
     def invoke_open_web(
@@ -322,6 +355,27 @@ class AgentCoreHarnessInvoker:
                 "features": features,
                 "fixturePack": _fixture_pack_name(fixture_pack),
                 "requiredDataKeys": DOMAIN_DATA_KEYS["hazard_subagent"],
+            },
+        )
+
+    def invoke_material(
+        self,
+        materials: Any,
+        *,
+        case_id: str | None,
+        upstream_context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        return self._invoke_json(
+            "material_subagent",
+            {
+                "task": (
+                    "Validate ASI/ASI:ONE-authorized material references and return safe extraction summaries only. "
+                    "Return JSON only and do not expose raw material content, signed URLs, tokens, or credentials."
+                ),
+                "materials": sanitize_material_references(materials),
+                "caseId": case_id,
+                "upstream": upstream_context if isinstance(upstream_context, dict) else {},
+                "requiredDataKeys": DOMAIN_DATA_KEYS["material_subagent"],
             },
         )
 
@@ -522,6 +576,12 @@ class AgentCoreHarnessInvoker:
                 _list(payload.get("features")),
                 fixture_pack=fixture_pack,
             )
+        if group == "material_subagent":
+            return direct.invoke_material(
+                payload.get("materials"),
+                case_id=str(payload.get("caseId")) if payload.get("caseId") else None,
+                upstream_context=_dict(payload.get("upstream")),
+            )
         if group == "open_web_subagent":
             return direct.invoke_open_web(
                 _dict(payload.get("location")),
@@ -579,6 +639,7 @@ def _load_harness_arns() -> dict[str, str]:
     for group, spec in {
         "rams_geospatial_harness": "RAMS_GEOSPATIAL_HARNESS_ARN",
         "rams_planning_harness": "RAMS_PLANNING_HARNESS_ARN",
+        "rams_material_harness": "RAMS_MATERIAL_HARNESS_ARN",
         "rams_hazard_harness": "RAMS_HAZARD_HARNESS_ARN",
         "rams_open_web_harness": "RAMS_OPEN_WEB_HARNESS_ARN",
         "rams_annotation_harness": "RAMS_ANNOTATION_HARNESS_ARN",

@@ -24,11 +24,19 @@
       "outputs": ["planningText", "trace"]
     },
     {
+      "id": "material_subagent",
+      "harness": "rams_material_harness",
+      "phase": "material_evidence_ingestion",
+      "allowedTools": ["ingest_material_references"],
+      "dependsOn": ["planning_subagent"],
+      "outputs": ["acceptedReferences", "skipped", "sources", "evidence", "findings", "trace"]
+    },
+    {
       "id": "hazard_subagent",
       "harness": "rams_hazard_harness",
       "phase": "evidence_synthesis",
       "allowedTools": ["extract_hazard_notes"],
-      "dependsOn": ["geospatial_subagent", "planning_subagent"],
+      "dependsOn": ["geospatial_subagent", "planning_subagent", "material_subagent"],
       "outputs": ["hazards", "trace"]
     },
     {
@@ -68,6 +76,10 @@
     {
       "step": "initial_parallel_research",
       "parallel": ["geospatial_subagent", "planning_subagent"]
+    },
+    {
+      "step": "material_evidence_ingestion",
+      "parallel": ["material_subagent"]
     },
     {
       "step": "evidence_synthesis",

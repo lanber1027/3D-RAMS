@@ -16,7 +16,7 @@ for path in (TOOLS_ROOT, APP_ROOT):
 
 from rams_agent_tools.config import RuntimeConfig  # noqa: E402
 from supervisor_core.harness_contract import HARNESS_OUTPUT_SCHEMA_VERSION  # noqa: E402
-from supervisor_core.subagent_invoker import AgentCoreHarnessInvoker  # noqa: E402
+from supervisor_core.subagent_invoker import AgentCoreHarnessInvoker, DirectSubagentInvoker  # noqa: E402
 
 
 class EnvPatch:
@@ -146,6 +146,86 @@ def harness_output(group: str, harness: str, data: dict[str, Any], **updates: An
 
 
 class AgentCoreHarnessInvokerTests(unittest.TestCase):
+    def test_direct_material_invoker_returns_harness_envelope(self):
+        result = DirectSubagentInvoker().invoke_material(
+            [
+                {
+                    "materialId": "asio_material_site_access_plan",
+                    "sourceSystem": "asio",
+                    "type": "application/pdf",
+                    "label": "Site access plan",
+                    "caseId": "case_material_invoker_001",
+                    "access": {
+                        "mode": "asio_authorized_reference",
+                        "expiresAt": "2099-01-01T00:00:00Z",
+                    },
+                }
+            ],
+            case_id="case_material_invoker_001",
+            upstream_context={"source": "ASI_ONE"},
+        )
+
+        self.assertEqual(result["schemaVersion"], HARNESS_OUTPUT_SCHEMA_VERSION)
+        self.assertEqual(result["subagent"]["name"], "material_subagent")
+        self.assertEqual(result["subagent"]["harness"], "rams_material_harness")
+        self.assertEqual(result["data"]["accepted"], 1)
+        self.assertEqual(result["acceptedReferences"][0]["sourceId"], "material-asio-material-site-access-plan")
+        self.assertTrue(result["evidence"])
+        self.assertTrue(result["findings"])
+        self.assertTrue(any(step["name"] == "ingest_material_references" for step in result["trace"]))
+
+    def test_agentcore_material_invoker_uses_material_harness_arn(self):
+        config = RuntimeConfig.from_env(request_bedrock=False)
+        payload = harness_output(
+            "material_subagent",
+            "rams_material_harness",
+            {
+                "schemaVersion": "3d-rams.material-ingestion.v1",
+                "status": "disabled",
+                "mode": "deterministic-local-material-adapter",
+                "received": 0,
+                "accepted": 0,
+                "skippedCount": 0,
+                "acceptedReferences": [],
+                "skipped": [],
+                "sources": [],
+                "evidence": [],
+                "findings": [],
+                "sourceIds": [],
+                "evidenceIds": [],
+            },
+        )
+        client = OneShotHarnessClient(payload)
+        with EnvPatch(RAMS_MATERIAL_HARNESS_ARN="arn:aws:bedrock-agentcore:eu-west-2:123456789012:harness/rams_material_harness-ABCDEFGHIJ"):
+            invoker = AgentCoreHarnessInvoker(config=config, client=client)
+            result = invoker.invoke_material(
+                [
+                    {
+                        "materialId": "asio_material_site_access_plan",
+                        "sourceSystem": "asio",
+                        "type": "application/pdf",
+                        "label": "Site access plan",
+                        "access": {
+                            "mode": "asio_authorized_reference",
+                            "retrievalUrl": "https://materials.example.invalid/private.pdf?token=SHOULD_NOT_LEAK",
+                            "token": "SHOULD_NOT_LEAK",
+                        },
+                    }
+                ],
+                case_id="case_material_invoker_002",
+                upstream_context={"source": "ASI_ONE"},
+            )
+
+        self.assertEqual(result["subagent"]["name"], "material_subagent")
+        self.assertEqual(
+            client.calls[0]["harnessArn"],
+            "arn:aws:bedrock-agentcore:eu-west-2:123456789012:harness/rams_material_harness-ABCDEFGHIJ",
+        )
+        first_prompt = json.dumps(client.calls[0]["messages"])
+        self.assertNotIn("SHOULD_NOT_LEAK", first_prompt)
+        self.assertNotIn("retrievalUrl", first_prompt)
+        self.assertIn("retrieval", first_prompt)
+
     def test_invoke_harness_runs_inline_tool_loop_and_returns_json(self):
         config = RuntimeConfig.from_env(request_bedrock=False)
         client = FakeHarnessClient()

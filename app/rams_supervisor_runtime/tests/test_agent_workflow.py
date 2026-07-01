@@ -14,6 +14,7 @@ for path in (TOOLS_ROOT, APP_ROOT):
 
 from rams_agent_tools import fixtures as fixture_module  # noqa: E402
 from rams_agent_tools.config import RuntimeConfig  # noqa: E402
+from rams_agent_tools.tools import SUPERVISOR_HARNESS_SUBAGENTS, harness_for_group, tools_for_group  # noqa: E402
 from supervisor_core.agent import run_site_briefing  # noqa: E402
 from supervisor_core.harness_contract import HARNESS_OUTPUT_SCHEMA_VERSION, validate_harness_output  # noqa: E402
 from supervisor_core.subagent_invoker import AgentCoreHarnessInvoker  # noqa: E402
@@ -78,6 +79,7 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertEqual(result["runtime"]["activeAgentMode"], "deterministic-planner")
         self.assertEqual(result["runtime"]["modelCallCount"], 0)
         self.assertEqual(result["llmPlan"]["initialParallelGroups"], ["geospatial_subagent", "planning_subagent"])
+        self.assertEqual(result["llmPlan"]["sequentialGroups"][0], "material_subagent")
         self.assertEqual(result["llmPlan"]["reportParallelGroups"], ["annotation_subagent", "briefing_subagent"])
         self.assertEqual(result["reasoning"]["mode"], "deterministic")
         self.assertIn("reportFit", result["reasoning"])
@@ -217,6 +219,12 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertEqual(trace_step["status"], "ok")
         self.assertEqual(trace_step["output"]["accepted"], 1)
         self.assertIn("ev-material-asio-material-site-access-plan", trace_step["evidenceIds"])
+        dispatch_step = next(step for step in result["trace"] if step["name"] == "dispatch_material_subagent")
+        self.assertEqual(dispatch_step["output"]["groups"], ["material_subagent"])
+        self.assertEqual(dispatch_step["output"]["harnesses"]["material_subagent"], "rams_material_harness")
+        material_output = next(output for output in result["subagentOutputs"] if output["subagent"]["name"] == "material_subagent")
+        self.assertEqual(material_output["subagent"]["harness"], "rams_material_harness")
+        self.assertEqual(material_output["data"]["accepted"], 1)
 
         serialized = json.dumps(result)
         self.assertNotIn("DUMMY_MATERIAL_ACCESS_MARKER_SHOULD_NOT_LEAK", serialized)
@@ -276,6 +284,9 @@ class SiteBriefingAgentTests(unittest.TestCase):
         trace_step = next(step for step in result["trace"] if step["name"] == "ingest_material_references")
         self.assertEqual(trace_step["status"], "warning")
         self.assertEqual({item["reason"] for item in trace_step["output"]["skipped"]}, reasons)
+        material_output = next(output for output in result["subagentOutputs"] if output["subagent"]["name"] == "material_subagent")
+        self.assertEqual(material_output["status"], "warning")
+        self.assertEqual(material_output["data"]["skippedCount"], 3)
 
         serialized = json.dumps(result)
         self.assertNotIn("DENIED_DUMMY_ACCESS_MARKER_SHOULD_NOT_LEAK", serialized)
@@ -355,7 +366,11 @@ class SiteBriefingAgentTests(unittest.TestCase):
         dispatch_steps = {
             step["name"]: step
             for step in result["trace"]
-            if step["name"] in {"dispatch_parallel_tool_groups", "dispatch_parallel_report_groups"}
+            if step["name"] in {
+                "dispatch_parallel_tool_groups",
+                "dispatch_material_subagent",
+                "dispatch_parallel_report_groups",
+            }
         }
 
         self.assertEqual(
@@ -378,7 +393,16 @@ class SiteBriefingAgentTests(unittest.TestCase):
             dispatch_steps["dispatch_parallel_tool_groups"]["output"]["mode"],
             "direct-local-harness-adapter",
         )
+        self.assertEqual(
+            dispatch_steps["dispatch_material_subagent"]["output"]["harnesses"]["material_subagent"],
+            "rams_material_harness",
+        )
         self.assertEqual(result["runtime"]["subagentExecutionMode"], "direct-local-harness-adapter")
+
+    def test_material_subagent_is_registered_for_planner_and_tools(self):
+        self.assertEqual(harness_for_group("material_subagent"), "rams_material_harness")
+        self.assertEqual(tools_for_group("material_subagent"), ["ingest_material_references"])
+        self.assertEqual(SUPERVISOR_HARNESS_SUBAGENTS["material_subagent"]["phase"], "material_evidence_ingestion")
 
     def test_subagent_outputs_use_shared_harness_envelope(self):
         result = run_site_briefing({"fixturePack": "public-lambeth-thames", "useBedrock": False})
@@ -386,12 +410,13 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertEqual(result["runtime"]["harnessOutputSchemaVersion"], HARNESS_OUTPUT_SCHEMA_VERSION)
         self.assertTrue(result["runtime"]["harnessContract"]["contractCompliant"])
         self.assertEqual(result["runtime"]["harnessContract"]["fallbackCount"], 0)
-        self.assertEqual(len(result["subagentOutputs"]), 6)
+        self.assertEqual(len(result["subagentOutputs"]), 7)
         self.assertEqual(
             result["runtime"]["harnessContract"]["observedSubagents"],
             [
                 "geospatial_subagent",
                 "planning_subagent",
+                "material_subagent",
                 "hazard_subagent",
                 "open_web_subagent",
                 "annotation_subagent",

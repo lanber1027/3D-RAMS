@@ -111,7 +111,7 @@ def generate_bedrock_subagent_plan(
             "required_json_schema": {
                 "rationale": "short string",
                 "initial_parallel_groups": ["geospatial_subagent", "planning_subagent"],
-                "sequential_groups": ["hazard_subagent", "open_web_subagent", "review_guardrail"],
+                "sequential_groups": ["material_subagent", "hazard_subagent", "open_web_subagent", "review_guardrail"],
                 "report_parallel_groups": ["annotation_subagent", "briefing_subagent"],
                 "required_evidence": ["short strings"],
                 "missing_inputs": ["short strings"],
@@ -372,16 +372,19 @@ def _subagent_list(value: Any, fallback: list[str]) -> list[str]:
 
 def _ensure_required_subagents(plan: dict[str, Any]) -> dict[str, Any]:
     initial = _subagent_list(plan.get("initial_parallel_groups"), ["geospatial_subagent", "planning_subagent"])
-    sequential = _subagent_list(plan.get("sequential_groups"), ["hazard_subagent", "open_web_subagent", "review_guardrail"])
+    sequential = _subagent_list(plan.get("sequential_groups"), ["material_subagent", "hazard_subagent", "open_web_subagent", "review_guardrail"])
     report = _subagent_list(plan.get("report_parallel_groups"), ["annotation_subagent", "briefing_subagent"])
 
     for group in ["geospatial_subagent", "planning_subagent"]:
         if group not in initial:
             initial.append(group)
+    if "material_subagent" not in sequential:
+        sequential.insert(0, "material_subagent")
     if "hazard_subagent" not in sequential:
-        sequential.insert(0, "hazard_subagent")
+        insert_at = 1 if "material_subagent" in sequential else 0
+        sequential.insert(insert_at, "hazard_subagent")
     if "open_web_subagent" not in sequential:
-        insert_at = 1 if "hazard_subagent" in sequential else 0
+        insert_at = sequential.index("hazard_subagent") + 1 if "hazard_subagent" in sequential else 0
         sequential.insert(insert_at, "open_web_subagent")
     if "review_guardrail" not in sequential:
         sequential.append("review_guardrail")
@@ -399,12 +402,13 @@ def _default_subagent_plan() -> dict[str, Any]:
     return {
         "rationale": "Use the standard 3D-RAMS bounded Harness workflow for a complete review pack.",
         "initial_parallel_groups": ["geospatial_subagent", "planning_subagent"],
-        "sequential_groups": ["hazard_subagent", "open_web_subagent", "review_guardrail"],
+        "sequential_groups": ["material_subagent", "hazard_subagent", "open_web_subagent", "review_guardrail"],
         "report_parallel_groups": ["annotation_subagent", "briefing_subagent"],
         "required_evidence": [
             "resolved location",
             "geospatial features",
             "planning context",
+            "authorized material references",
             "candidate hazards",
             "open-web public signals",
             "3D annotations",
@@ -419,6 +423,7 @@ def _all_required_subagents() -> list[str]:
     return [
         "geospatial_subagent",
         "planning_subagent",
+        "material_subagent",
         "hazard_subagent",
         "open_web_subagent",
         "annotation_subagent",

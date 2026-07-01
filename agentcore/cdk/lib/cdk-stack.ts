@@ -286,6 +286,7 @@ export class AgentCoreStack extends Stack {
     const harnessNames = [
       'rams_geospatial_harness',
       'rams_planning_harness',
+      'rams_material_harness',
       'rams_hazard_harness',
       'rams_annotation_harness',
       'rams_briefing_harness',
