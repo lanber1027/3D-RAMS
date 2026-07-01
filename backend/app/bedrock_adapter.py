@@ -574,6 +574,16 @@ def _mock_bedrock_output_evaluation(
             }
         )
         evaluation["retryTools"].append("compile_review_pack")
+    if scenario == "fail-upstream-geo":
+        evaluation["passed"] = False
+        evaluation["scores"]["grounding"] = 0.0
+        evaluation["issues"].append(
+            {
+                "code": "mock_llm_geo_context_failure",
+                "message": "Mock evaluator requested an upstream geospatial refresh.",
+            }
+        )
+        evaluation["retryTools"].append("load_geospatial_features")
     return evaluation
 
 

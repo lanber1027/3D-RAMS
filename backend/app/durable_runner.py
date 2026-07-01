@@ -832,7 +832,7 @@ def _maybe_run_llm_evaluator(
                 }
             )
             evaluation["retryTools"] = _dedupe_tools(
-                [*evaluation.get("retryTools", []), *llm_evaluation.get("retryTools", [])]
+                _expand_retry_dependencies([*evaluation.get("retryTools", []), *llm_evaluation.get("retryTools", [])])
             )
         evaluation["llmEvaluator"] = {"used": True, "result": llm_evaluation, "metadata": metadata}
     except Exception as exc:
@@ -1316,6 +1316,7 @@ def _is_negated_quality_boundary(text: str, claim_start: int, term: str) -> bool
         f"not an {term}",
         f"not be treated as {term}",
         f"without {term}",
+        "not a certified rams or work approval",
         "not certified rams, emergency guidance, or work approval",
     ]
     return any(pattern in boundary_text for pattern in safe_patterns)

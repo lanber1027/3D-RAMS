@@ -411,6 +411,43 @@ class DurableRunApiTests(unittest.TestCase):
         self.assertEqual(result["runtime"]["phaseTokenBudgets"]["reasoner"], 1500)
         self.assertEqual(result["runtime"]["phaseTokenBudgets"]["compiler"], 2200)
 
+    def test_llm_evaluator_upstream_retry_expands_downstream_dependencies(self):
+        with EnvPatch(
+            ENABLE_BEDROCK="true",
+            BEDROCK_MOCK_RESPONSE="true",
+            BEDROCK_MOCK_PLANNER_SCENARIO="v2-valid",
+            BEDROCK_MOCK_EVALUATOR_SCENARIO="fail-upstream-geo",
+            BEDROCK_MAX_MODEL_CALLS="4",
+            DURABLE_RUN_MAX_TOOL_CALLS="15",
+            APP_ACCESS_TOKEN_HASH=None,
+            DURABLE_RUN_PROCESS_INLINE="true",
+        ):
+            session = self._session()
+            response = self._run(
+                session["sessionId"],
+                "I want to visit 8 Albert Embankment tomorrow for a survey.",
+                useBedrock=True,
+            )
+
+        self.assertEqual(response.status_code, 202)
+        result = response.json()
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["result"]["evaluationStopReason"], "passed_after_retry")
+        improvement = next(step for step in result["steps"] if step["name"] == "output_improvement_loop")
+        retry_tools = improvement["output"]["retryTools"]
+        self.assertIn("load_geospatial_features", retry_tools)
+        self.assertIn("build_scene_config", retry_tools)
+        self.assertIn("extract_hazard_notes", retry_tools)
+        self.assertIn("rank_risks", retry_tools)
+        self.assertIn("create_annotations", retry_tools)
+        self.assertIn("compile_review_pack", retry_tools)
+        self.assertTrue(
+            any(
+                step["name"] == "tool:build_scene_config" and step["output"].get("evaluationLoop") == 1
+                for step in result["steps"]
+            )
+        )
+
     def test_poor_grounding_triggers_compile_retry_and_passes_after_loop(self):
         from app import durable_runner
         from app.tools import trace_step
