@@ -123,7 +123,7 @@ function AgentStatePanel({ sessionState, runStatus, run, conversationDebug }) {
         <div className="conversation-observability">
           <div>
             <span>Current activity</span>
-            <strong>{displayValue(conversationDebug.observability?.phase || conversationDebug.route)}</strong>
+            <strong>{displayValue(conversationDebug.conversationState?.intent || conversationDebug.observability?.phase || conversationDebug.route)}</strong>
             <p>{displayValue(conversationDebug.observability?.noToolReason, "Tools may be running in the active run trace.")}</p>
           </div>
           <div>
@@ -132,9 +132,9 @@ function AgentStatePanel({ sessionState, runStatus, run, conversationDebug }) {
             <p>Route: {displayValue(conversationDebug.route)} / model calls: {displayValue(conversationDebug.observability?.modelCalls, "0")}</p>
           </div>
           <div>
-            <span>Latest visible step</span>
-            <strong>{displayValue(conversationDebug.trace?.[0]?.name || conversationDebug.observability?.modelPhase, "conversation")}</strong>
-            <p>{displayValue(conversationDebug.trace?.[0]?.output?.orchestratorReason, "No extra model reason returned.")}</p>
+            <span>Next action</span>
+            <strong>{displayValue(conversationDebug.conversationState?.allowedNextAction || conversationDebug.trace?.[0]?.name, "conversation")}</strong>
+            <p>{displayValue(conversationDebug.conversationState?.locationStatus || conversationDebug.trace?.[0]?.output?.orchestratorReason, "No extra model reason returned.")}</p>
           </div>
         </div>
       )}
@@ -361,19 +361,22 @@ function LocationConfirmationPanel({ resolution, onConfirm, onReject, onManual, 
   if (!resolution?.siteName && !toList(resolution?.locationCandidates).length) return null;
   const candidates = toList(resolution.locationCandidates);
   const primaryCandidate = candidates[0];
+  const hasCandidates = candidates.length > 0;
+  const intent = resolution.intent || {};
+  const locationLabel = resolution.siteName || intent.placeHint || intent.areaHint || "the described location";
   return (
     <section className="panel location-confirmation-panel">
       <div className="panel-heading">
         <MapPinned size={18} />
-        <h2>Confirm Site Location</h2>
+        <h2>{hasCandidates ? "Confirm Site Location" : "Location Needed"}</h2>
       </div>
       <p className="confirmation-copy">
-        {candidates.length
+        {hasCandidates
           ? "The agent found source-labelled candidate locations. Confirm one before map, evidence, risk, or briefing tools run."
-          : "The agent searched the cached/source resolver but did not find a reliable candidate. Any risk prompts shown below are provisional and not site-specific evidence."}
+          : "The agent has not found a reliable candidate to confirm. Map, evidence, risk, and briefing tools have not started."}
       </p>
       <CandidateMapPreview candidate={primaryCandidate} />
-      {candidates.length > 0 ? (
+      {hasCandidates ? (
         <div className="candidate-grid">
           {candidates.map((candidate) => (
             <article key={candidate.candidateId} className="candidate-card">
@@ -425,7 +428,25 @@ function LocationConfirmationPanel({ resolution, onConfirm, onReject, onManual, 
           ))}
         </div>
       ) : (
-        <p className="empty-copy">No reliable cached/public candidate was found for {resolution.siteName}. The site-specific review workflow has not started.</p>
+        <div className="location-needed">
+          <p className="empty-copy">
+            I captured {locationLabel}, but I need a trusted location before producing site-specific output.
+          </p>
+          <div className="location-needed-actions">
+            <article>
+              <strong>Best</strong>
+              <span>Send a full UK postcode.</span>
+            </article>
+            <article>
+              <strong>Precise</strong>
+              <span>Send latitude/longitude.</span>
+            </article>
+            <article>
+              <strong>Alternative</strong>
+              <span>Give a specific park/site name, nearest road, or public source.</span>
+            </article>
+          </div>
+        </div>
       )}
       <button className="secondary" type="button" onClick={onManual} disabled={loading}>
         Enter coordinates manually
@@ -827,13 +848,24 @@ function App() {
       if (!response.ok) throw new Error(`Agent message failed (${response.status})`);
       const result = await response.json();
       if (result.run) {
+        const runToolCount = Array.isArray(result.run.toolResults) ? result.run.toolResults.length : 0;
+        const runToolsStarted = runToolCount > 0;
+        const runPhase =
+          result.run.status === "waiting_for_location_confirmation"
+            ? "waiting_for_location_confirmation"
+            : runToolsStarted
+              ? "durable_run_tools_started"
+              : "durable_run_started";
         setConversationDebug({
           route: result.route,
+          conversationState: result.conversationState,
           observability: {
-            phase: "durable_run_started",
-            toolsStarted: true,
+            phase: runPhase,
+            toolsStarted: runToolsStarted,
             modelCalls: result.run.modelCallsUsed ?? 0,
-            noToolReason: null,
+            noToolReason: runToolsStarted
+              ? null
+              : "Durable run accepted, but map/evidence/risk/briefing tools have not started yet.",
           },
           trace: result.run.steps || result.trace || [],
         });
@@ -843,6 +875,7 @@ function App() {
       } else {
         const nextConversationDebug = {
           route: result.route,
+          conversationState: result.conversationState,
           observability: result.observability || {
             phase: "conversation_only",
             toolsStarted: false,

@@ -975,6 +975,34 @@ textarea {
   padding: 8px 10px;
 }
 
+.location-needed {
+  display: grid;
+  gap: 10px;
+}
+
+.location-needed-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.location-needed-actions article {
+  border: 1px solid #dce6e1;
+  border-radius: 8px;
+  background: #f7faf8;
+  padding: 10px;
+}
+
+.location-needed-actions strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.location-needed-actions span {
+  color: #526861;
+  font-size: 0.92rem;
+}
+
 .architecture-visualizer {
   margin-top: 14px;
 }
@@ -1149,6 +1177,7 @@ textarea {
   .agent-evaluation-strip,
   .conversation-observability,
   .runtime-strip,
+  .location-needed-actions,
   .run-status-bar {
     grid-template-columns: 1fr;
   }

@@ -119,6 +119,8 @@ def _parse_message_to_request(
     named_site_hint = intent["namedSiteHint"]
     site_label = intent["siteName"]
     unsafe_intent = intent["unsafeIntent"]
+    vague_location_hint = bool(intent.get("vagueLocationHint"))
+    site_visit_intent = bool(intent.get("siteVisitIntent"))
     if unsafe_intent:
         trace = [
             trace_step(
@@ -144,10 +146,12 @@ def _parse_message_to_request(
     postcode_needs_confirmation = bool((postcode or outcode) and not known_lambeth)
     coordinate_needs_confirmation = bool(coordinate and not known_lambeth)
     location_evidence_needs_confirmation = coordinate_needs_confirmation or postcode_needs_confirmation
-    unresolved_named_site = bool(site_label and not coordinate and not known_lambeth and named_site_hint)
-    has_site_signal = coordinate is not None or postcode or outcode or known_lambeth or named_site_hint
+    unresolved_named_site = bool(
+        (site_label or vague_location_hint) and not coordinate and not known_lambeth and (named_site_hint or vague_location_hint)
+    )
+    has_site_signal = coordinate is not None or postcode or outcode or known_lambeth or named_site_hint or vague_location_hint
     trace_status = "warning" if location_evidence_needs_confirmation or unresolved_named_site or not has_site_signal else "ok"
-    site_label = site_label or postcode or outcode or "User-supplied location"
+    site_label = site_label or _location_hint_label(intent) or postcode or outcode or "User-supplied location"
     trace = [
         trace_step(
             "chat_parse_user_request",
@@ -166,11 +170,15 @@ def _parse_message_to_request(
                 "postcode": intent.get("postcode"),
                 "outcode": intent.get("outcode"),
                 "nearestTown": intent.get("nearestTown"),
+                "areaHint": intent.get("areaHint"),
+                "placeHint": intent.get("placeHint"),
                 "siteTypes": intent.get("siteTypes", []),
                 "activities": intent.get("activities", []),
                 "unsafeIntent": unsafe_intent,
                 "knownPublicFixture": known_lambeth,
                 "namedSiteHint": named_site_hint,
+                "vagueLocationHint": vague_location_hint,
+                "siteVisitIntent": site_visit_intent,
                 "siteName": site_label,
                 "siteResolution": (
                     "coordinate-confirmation"
@@ -544,6 +552,12 @@ def _summarise_message(message: str) -> str:
 
 def _targeted_location_question(intent: dict[str, Any]) -> str:
     clues = []
+    if intent.get("placeHint") and intent.get("areaHint"):
+        clues.append(f"{intent['placeHint']} in {intent['areaHint']}")
+    elif intent.get("placeHint"):
+        clues.append(str(intent["placeHint"]))
+    elif intent.get("areaHint"):
+        clues.append(f"in {intent['areaHint']}")
     if intent.get("nearestTown"):
         clues.append(f"near {intent['nearestTown']}")
     if intent.get("outcode"):
@@ -555,3 +569,15 @@ def _targeted_location_question(intent: dict[str, Any]) -> str:
         "Please confirm one of the candidate cards, or provide a full postcode, OS grid reference, "
         f"latitude/longitude, nearest road/town, or local authority.{clue_text}"
     )
+
+
+def _location_hint_label(intent: dict[str, Any]) -> str | None:
+    place = intent.get("placeHint")
+    area = intent.get("areaHint") or intent.get("nearestTown")
+    if place and area:
+        return f"{place} near {area}"
+    if place:
+        return f"{place} location"
+    if area:
+        return f"location near {area}"
+    return None

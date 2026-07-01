@@ -300,11 +300,27 @@ def generate_bedrock_conversation_orchestration(
                 "should_start_run": "boolean",
                 "pending_user_action": "short string or null",
                 "reason": "short string",
+                "conversation_state": {
+                    "intent": "one of: conversation, location_discovery, location_correction, location_confirmation, ready_for_review, unsafe, status",
+                    "location_status": "one of: none, vague, needs_evidence, candidate_pending, confirmed, unsafe, not_applicable",
+                    "known_details": {
+                        "place_hint": "string or null",
+                        "area_hint": "string or null",
+                        "activity": "string or null",
+                        "postcode": "string or null",
+                        "coordinate": "string or null",
+                        "site_name": "string or null"
+                    },
+                    "missing_details": ["short strings"],
+                    "allowed_next_action": "one of: answer, ask_location_clarification, reject_location, show_location_candidates, start_guarded_run, safety_refusal",
+                    "should_start_run": "boolean"
+                },
             },
             "routing_rules": [
                 "Greeting or small-talk messages should be answered conversationally and should_start_run must be false.",
                 "Questions about a previous agent message should use session_context and should_start_run must be false.",
                 "Only recommend new_run when the user is asking for a site visit/pre-visit review or correcting a location.",
+                "Vague location-discovery messages such as 'near a park in Brighton' must be intent=location_discovery, location_status=vague or needs_evidence, and must not invent a site name or coordinate.",
                 "For name-only sites without postcode/coordinate, recommend new_run so the backend can create a gated clarification/provisional checklist.",
                 "For postcode or latitude/longitude, recommend new_run so the backend can create a location confirmation candidate.",
                 "For unsafe certification, approval, or emergency requests, do not start tools; explain the safety boundary.",
@@ -313,6 +329,10 @@ def generate_bedrock_conversation_orchestration(
             "message": message[:1200],
             "structured_intent": {
                 "siteName": intent.get("siteName"),
+                "placeHint": intent.get("placeHint"),
+                "areaHint": intent.get("areaHint"),
+                "vagueLocationHint": intent.get("vagueLocationHint"),
+                "siteVisitIntent": intent.get("siteVisitIntent"),
                 "hasLocationEvidence": intent.get("hasLocationEvidence"),
                 "namedSiteHint": intent.get("namedSiteHint"),
                 "coordinatePresent": intent.get("coordinate") is not None,
@@ -520,7 +540,116 @@ def _normalise_conversation_orchestration(parsed: dict[str, Any]) -> dict[str, A
         "shouldStartRun": should_start_run,
         "pendingUserAction": _normalise_pending_user_action(parsed.get("pending_user_action")),
         "reason": _text(parsed.get("reason"), "Conversation orchestrator classified the message."),
+        "conversationState": _normalise_conversation_state(parsed.get("conversation_state") or parsed.get("conversationState"), route, should_start_run),
     }
+
+
+_CONVERSATION_STATE_INTENTS = {
+    "conversation",
+    "location_discovery",
+    "location_correction",
+    "location_confirmation",
+    "ready_for_review",
+    "unsafe",
+    "status",
+}
+
+_LOCATION_STATUSES = {
+    "none",
+    "vague",
+    "needs_evidence",
+    "candidate_pending",
+    "confirmed",
+    "unsafe",
+    "not_applicable",
+}
+
+_ALLOWED_NEXT_ACTIONS = {
+    "answer",
+    "ask_location_clarification",
+    "reject_location",
+    "show_location_candidates",
+    "start_guarded_run",
+    "safety_refusal",
+}
+
+
+def _normalise_conversation_state(value: Any, route: str, should_start_run: bool) -> dict[str, Any]:
+    raw = value if isinstance(value, dict) else {}
+    intent = str(raw.get("intent") or _state_intent_from_route(route)).strip().lower().replace("-", "_")
+    if intent not in _CONVERSATION_STATE_INTENTS:
+        intent = _state_intent_from_route(route)
+    location_status = str(raw.get("location_status") or raw.get("locationStatus") or _location_status_from_intent(intent)).strip().lower().replace("-", "_")
+    if location_status not in _LOCATION_STATUSES:
+        location_status = _location_status_from_intent(intent)
+    known_details = raw.get("known_details") or raw.get("knownDetails")
+    if not isinstance(known_details, dict):
+        known_details = {}
+    missing_details = raw.get("missing_details") or raw.get("missingDetails") or []
+    if not isinstance(missing_details, list):
+        missing_details = []
+    allowed_next_action = str(
+        raw.get("allowed_next_action") or raw.get("allowedNextAction") or _allowed_action_from_state(intent, should_start_run)
+    ).strip().lower().replace("-", "_")
+    if allowed_next_action not in _ALLOWED_NEXT_ACTIONS:
+        allowed_next_action = _allowed_action_from_state(intent, should_start_run)
+    state_should_start = raw.get("should_start_run")
+    return {
+        "intent": intent,
+        "locationStatus": location_status,
+        "knownDetails": {
+            "placeHint": _nullable_text(known_details.get("place_hint") or known_details.get("placeHint")),
+            "areaHint": _nullable_text(known_details.get("area_hint") or known_details.get("areaHint")),
+            "activity": _nullable_text(known_details.get("activity")),
+            "postcode": _nullable_text(known_details.get("postcode")),
+            "coordinate": _nullable_text(known_details.get("coordinate")),
+            "siteName": _nullable_text(known_details.get("site_name") or known_details.get("siteName")),
+        },
+        "missingDetails": [_text(item, "")[:80] for item in missing_details if _text(item, "").strip()][:5],
+        "allowedNextAction": allowed_next_action,
+        "shouldStartRun": bool(state_should_start) if state_should_start is not None else should_start_run,
+    }
+
+
+def _state_intent_from_route(route: str) -> str:
+    if route == "status":
+        return "status"
+    if route in {"location_correction", "reject_location"}:
+        return "location_correction"
+    if route in {"confirm_by_chat"}:
+        return "location_confirmation"
+    if route == "new_run":
+        return "ready_for_review"
+    return "conversation"
+
+
+def _location_status_from_intent(intent: str) -> str:
+    if intent == "location_discovery":
+        return "needs_evidence"
+    if intent in {"location_correction", "location_confirmation"}:
+        return "candidate_pending"
+    if intent == "ready_for_review":
+        return "confirmed"
+    if intent == "unsafe":
+        return "unsafe"
+    return "not_applicable"
+
+
+def _allowed_action_from_state(intent: str, should_start_run: bool) -> str:
+    if intent == "unsafe":
+        return "safety_refusal"
+    if should_start_run:
+        return "start_guarded_run"
+    if intent == "location_discovery":
+        return "ask_location_clarification"
+    if intent == "location_correction":
+        return "reject_location"
+    return "answer"
+
+
+def _nullable_text(value: Any) -> str | None:
+    text = _text(value, "").strip()
+    return text[:120] if text else None
 
 
 _PENDING_USER_ACTIONS = {
@@ -587,6 +716,7 @@ def _mock_bedrock_conversation_orchestration(
             "shouldStartRun": False,
             "pendingUserAction": "provide_site_location_and_activity",
             "reason": "Greeting only; no tool run needed.",
+            "conversationState": _mock_conversation_state(intent, "conversation", False),
         }
     if lower in {"what do you mean", "what does that mean", "explain", "explain that"}:
         pending = (
@@ -604,6 +734,7 @@ def _mock_bedrock_conversation_orchestration(
             "shouldStartRun": False,
             "pendingUserAction": pending,
             "reason": "Follow-up question should use bounded session memory.",
+            "conversationState": _mock_conversation_state(intent, "conversation", False),
         }
     if intent.get("unsafeIntent"):
         return {
@@ -615,6 +746,16 @@ def _mock_bedrock_conversation_orchestration(
             "shouldStartRun": False,
             "pendingUserAction": "provide_safe_site_visit_request",
             "reason": "Unsafe request must not start tools.",
+            "conversationState": _mock_conversation_state(intent, "unsafe", False),
+        }
+    if intent.get("vagueLocationHint") and not intent.get("hasLocationEvidence"):
+        return {
+            "route": "new_run",
+            "assistantMessage": "I can help, but I need a trusted postcode, latitude/longitude, or specific place before review tools run.",
+            "shouldStartRun": True,
+            "pendingUserAction": None,
+            "reason": "Vague location discovery should enter guarded location-detail workflow.",
+            "conversationState": _mock_conversation_state(intent, "location_discovery", True),
         }
     if intent.get("hasLocationEvidence") or intent.get("namedSiteHint"):
         return {
@@ -623,6 +764,7 @@ def _mock_bedrock_conversation_orchestration(
             "shouldStartRun": True,
             "pendingUserAction": None,
             "reason": "Site-review request or location correction detected.",
+            "conversationState": _mock_conversation_state(intent, "ready_for_review", True),
         }
     return {
         "route": "help",
@@ -633,6 +775,34 @@ def _mock_bedrock_conversation_orchestration(
         "shouldStartRun": False,
         "pendingUserAction": "provide_site_location_and_activity",
         "reason": "No site-review intent or trusted location evidence yet.",
+        "conversationState": _mock_conversation_state(intent, "conversation", False),
+    }
+
+
+def _mock_conversation_state(intent: dict[str, Any], state_intent: str, should_start_run: bool) -> dict[str, Any]:
+    location_status = (
+        "needs_evidence"
+        if state_intent == "location_discovery"
+        else "unsafe"
+        if state_intent == "unsafe"
+        else "confirmed"
+        if should_start_run and intent.get("hasLocationEvidence")
+        else "not_applicable"
+    )
+    return {
+        "intent": state_intent,
+        "locationStatus": location_status,
+        "knownDetails": {
+            "placeHint": intent.get("placeHint"),
+            "areaHint": intent.get("areaHint") or intent.get("nearestTown"),
+            "activity": ", ".join(intent.get("activities", [])) or None,
+            "postcode": intent.get("postcode") or intent.get("outcode"),
+            "coordinate": ", ".join(str(value) for value in intent.get("coordinate") or []) or None,
+            "siteName": intent.get("siteName"),
+        },
+        "missingDetails": [] if should_start_run and intent.get("hasLocationEvidence") else ["trusted postcode or latitude/longitude"],
+        "allowedNextAction": "start_guarded_run" if should_start_run else ("safety_refusal" if state_intent == "unsafe" else "ask_location_clarification"),
+        "shouldStartRun": should_start_run,
     }
 
 

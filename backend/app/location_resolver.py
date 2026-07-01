@@ -72,7 +72,14 @@ def resolve_location_candidates(
         matches = [postcode_candidate, *matches][:3]
         sources_used = sorted({candidate["source"] for candidate in matches})
     geoapify_trace = None
-    if not postcode_candidate and not matches:
+    skip_geoapify_for_vague_hint = bool(intent.get("vagueLocationHint") and not intent.get("namedSiteHint"))
+    if not postcode_candidate and not matches and skip_geoapify_for_vague_hint:
+        geoapify_trace = {
+            "status": "skipped",
+            "source": "geoapify/geocode/search",
+            "reason": "Vague place/area hints require user-provided postcode, coordinate, specific site name, or public evidence before live candidate lookup.",
+        }
+    elif not postcode_candidate and not matches:
         geoapify_candidates, geoapify_trace = resolve_geoapify_candidates(site_name, intent)
         if geoapify_candidates:
             matches = geoapify_candidates[:3]
@@ -84,6 +91,8 @@ def resolve_location_candidates(
             "postcode": intent.get("postcode"),
             "outcode": intent.get("outcode"),
             "nearestTown": intent.get("nearestTown"),
+            "areaHint": intent.get("areaHint"),
+            "placeHint": intent.get("placeHint"),
             "localAuthority": intent.get("localAuthority"),
             "siteTypes": intent.get("siteTypes", []),
             "activities": intent.get("activities", []),
@@ -124,6 +133,8 @@ def resolve_location_candidates(
             "postcodeLookup": postcode_trace,
             "geoapifyLookup": geoapify_trace,
             "nearestTown": intent.get("nearestTown"),
+            "areaHint": intent.get("areaHint"),
+            "placeHint": intent.get("placeHint"),
             "provisionalRiskCount": len(resolution["provisionalRisks"]),
         },
         source_ids=sources_used or ["location-resolver-fixtures"],

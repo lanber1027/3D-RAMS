@@ -51,6 +51,12 @@ _WEAK_SITE_LABELS = {
     "okay",
     "yes",
     "no",
+    "nope",
+    "nah",
+    "not that",
+    "not this",
+    "wrong",
+    "wrong site",
     "what do you mean",
     "what does that mean",
     "help",
@@ -67,6 +73,19 @@ _WEAK_SITE_LABELS = {
     "the site",
 }
 
+_VAGUE_PLACE_TERMS = [
+    "park",
+    "field",
+    "road",
+    "river",
+    "beach",
+    "forest",
+    "wood",
+    "woods",
+    "farm",
+    "site",
+]
+
 
 def parse_site_intent(message: str) -> dict[str, Any]:
     cleaned = re.sub(r"\s+", " ", message).strip()
@@ -75,6 +94,8 @@ def parse_site_intent(message: str) -> dict[str, Any]:
     postcode = extract_postcode(cleaned)
     outcode = extract_outcode(cleaned, postcode)
     nearest_town = extract_nearest_town(cleaned)
+    area_hint = extract_area_hint(cleaned)
+    place_hint = extract_place_hint(cleaned)
     local_authority = extract_local_authority(cleaned)
     site_name = extract_site_label(cleaned, coordinate=coordinate, postcode=postcode)
     site_types = _matched_terms(lower, _SITE_TYPE_TERMS)
@@ -82,10 +103,21 @@ def parse_site_intent(message: str) -> dict[str, Any]:
     unsafe_terms = [term for term in _UNSAFE_TERMS if term in lower]
     visit_date = extract_visit_date(cleaned)
     known_lambeth = any(term in lower for term in ["lambeth", "albert embankment", "thames", "8 albert"])
+    site_visit_intent = any(
+        term in lower
+        for term in [
+            "site visit",
+            "pre-visit",
+            "visit",
+            "survey",
+            "inspection",
+            "maintenance",
+        ]
+    )
+    vague_location_hint = bool((place_hint or area_hint or nearest_town) and site_visit_intent and not coordinate and not postcode)
     named_site_hint = bool(site_types) or any(
         term in lower
         for term in [
-            "site",
             "farm",
             "quarry",
             "substation",
@@ -104,6 +136,8 @@ def parse_site_intent(message: str) -> dict[str, Any]:
         "postcode": postcode,
         "outcode": outcode,
         "nearestTown": nearest_town,
+        "areaHint": area_hint,
+        "placeHint": place_hint,
         "localAuthority": local_authority,
         "siteTypes": site_types,
         "activities": activities,
@@ -112,6 +146,8 @@ def parse_site_intent(message: str) -> dict[str, Any]:
         "unsafeTerms": unsafe_terms,
         "knownPublicFixture": known_lambeth,
         "namedSiteHint": named_site_hint,
+        "vagueLocationHint": vague_location_hint,
+        "siteVisitIntent": site_visit_intent,
         "hasLocationEvidence": has_location_evidence,
     }
 
@@ -157,6 +193,29 @@ def extract_nearest_town(message: str) -> str | None:
     return None
 
 
+def extract_area_hint(message: str) -> str | None:
+    patterns = [
+        r"\bin\s+([A-Z][A-Za-z' -]{2,40})(?:\s+can\b|\s+could\b|\s+i\b|\s+we\b|\s+for\b|[,.?!]|$)",
+        r"\bnear\s+([A-Z][A-Za-z' -]{2,40})(?:\s+can\b|\s+could\b|\s+i\b|\s+we\b|\s+for\b|[,.?!]|$)",
+        r"\bclose to\s+([A-Z][A-Za-z' -]{2,40})(?:\s+can\b|\s+could\b|\s+i\b|\s+we\b|\s+for\b|[,.?!]|$)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, message)
+        if match:
+            label = _clean_label(match.group(1))
+            if label and not _is_weak_site_label(label):
+                return label
+    return None
+
+
+def extract_place_hint(message: str) -> str | None:
+    lower = message.lower()
+    for term in _VAGUE_PLACE_TERMS:
+        if re.search(rf"\b(?:a|an|the)?\s*{re.escape(term)}\b", lower):
+            return term
+    return None
+
+
 def extract_local_authority(message: str) -> str | None:
     match = re.search(r"\b(?:council|local authority)\s+(?:is\s+)?([A-Z][A-Za-z' -]{2,60})(?:[.,]|$)", message)
     return _clean_label(match.group(1)) if match else None
@@ -199,14 +258,14 @@ def extract_site_label(
         match = re.search(pattern, working, flags=re.IGNORECASE)
         if match:
             label = _clean_label(match.group(1))
-            if label and not _is_weak_site_label(label):
+            if label and not _is_weak_site_label(label) and not _is_vague_site_label(label):
                 return label[:90] if len(label) <= 90 else label[:87].rstrip() + "..."
     if coordinate:
         return f"Coordinate {coordinate[0]:.6f}, {coordinate[1]:.6f}"
     if postcode:
         return f"Postcode {postcode}"
     label = _clean_label(working[:90])
-    return "" if _is_weak_site_label(label) else label
+    return "" if _is_weak_site_label(label) or _is_vague_site_label(label) else label
 
 
 def _matched_terms(lower_message: str, groups: dict[str, list[str]]) -> list[str]:
@@ -225,3 +284,12 @@ def _is_weak_site_label(value: str) -> bool:
     if not label:
         return True
     return label in _WEAK_SITE_LABELS
+
+
+def _is_vague_site_label(value: str) -> bool:
+    label = value.strip().lower()
+    if not label:
+        return True
+    vague_starts = ("near ", "close to ", "around ", "by ", "where i live", "where we live")
+    vague_phrases = ("can you help", "help me find", "i need to visit there", "near a ", "near the ")
+    return label.startswith(vague_starts) or any(phrase in label for phrase in vague_phrases)

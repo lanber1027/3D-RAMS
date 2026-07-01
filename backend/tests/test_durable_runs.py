@@ -113,6 +113,57 @@ class DurableRunApiTests(unittest.TestCase):
         self.assertEqual(resolver_step["status"], "warning")
         self.assertEqual(resolver_step["output"]["candidateCount"], 0)
 
+    def test_vague_place_request_enters_location_needed_without_fake_site_name(self):
+        with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None, DURABLE_RUN_PROCESS_INLINE="true"):
+            session = self._session()
+            response = self._run(
+                session["sessionId"],
+                "I need to do a site visit near a park in Brighton, can you help me find it",
+            )
+
+        self.assertEqual(response.status_code, 202)
+        result = response.json()
+        self.assertEqual(result["status"], "waiting_for_location_confirmation")
+        self.assertTrue(result["result"]["needsClarification"])
+        self.assertFalse(result["result"]["needsLocationConfirmation"])
+        self.assertEqual(result["result"]["nextStage"], "provide_location_detail")
+        self.assertEqual(result["result"]["locationCandidates"], [])
+        location_resolution = result["result"]["uiState"]["locationResolution"]
+        self.assertEqual(location_resolution["siteName"], "park near Brighton")
+        self.assertEqual(location_resolution["intent"]["placeHint"], "park")
+        self.assertEqual(location_resolution["intent"]["areaHint"], "Brighton")
+        self.assertNotIn("can you help me find it", location_resolution["siteName"])
+        self.assertIsNone(result["result"]["scene"])
+        self.assertEqual(result["result"]["evidence"], [])
+        parse_step = next(step for step in result["result"]["trace"] if step["name"] == "chat_parse_user_request")
+        self.assertTrue(parse_step["output"]["vagueLocationHint"])
+        self.assertEqual(parse_step["output"]["siteResolution"], "unresolved")
+
+    def test_vague_place_request_skips_geoapify_even_when_enabled(self):
+        with EnvPatch(
+            ENABLE_BEDROCK="false",
+            APP_ACCESS_TOKEN_HASH=None,
+            DURABLE_RUN_PROCESS_INLINE="true",
+            ENABLE_GEOAPIFY_GEOCODING="true",
+            GEOAPIFY_API_KEY="test-key",
+        ), patch("app.geoapify_resolver.httpx.get") as geoapify_get:
+            session = self._session()
+            response = self._run(
+                session["sessionId"],
+                "I need to do a site visit near a park in Brighton, can you help me find it",
+            )
+
+        geoapify_get.assert_not_called()
+        self.assertEqual(response.status_code, 202)
+        result = response.json()
+        self.assertEqual(result["status"], "waiting_for_location_confirmation")
+        self.assertFalse(result["result"]["needsLocationConfirmation"])
+        self.assertEqual(result["result"]["nextStage"], "provide_location_detail")
+        self.assertEqual(result["result"]["locationCandidates"], [])
+        resolver_step = next(step for step in result["result"]["trace"] if step["name"] == "resolve_location_candidates")
+        self.assertEqual(resolver_step["output"]["geoapifyLookup"]["status"], "skipped")
+        self.assertEqual(result["result"]["uiState"]["locationResolution"]["siteName"], "park near Brighton")
+
     def test_durable_run_name_only_returns_provisional_checklist_without_review_tools(self):
         with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None, DURABLE_RUN_PROCESS_INLINE="true"):
             session = self._session()
@@ -333,6 +384,9 @@ class DurableRunApiTests(unittest.TestCase):
         self.assertEqual(response["action"], "answered_from_memory")
         self.assertEqual(response["route"], "greeting")
         self.assertEqual(response["assistantMessage"], "Hi. Send a postcode or coordinate plus the visit activity.")
+        self.assertEqual(response["conversationState"]["intent"], "conversation")
+        self.assertEqual(response["conversationState"]["allowedNextAction"], "answer")
+        self.assertFalse(response["conversationState"]["shouldStartRun"])
         self.assertEqual(session_state["runs"], [])
         self.assertEqual(session_state["workingMemory"]["pendingUserAction"], "provide_site_location_and_activity")
 
@@ -671,7 +725,7 @@ class DurableRunApiTests(unittest.TestCase):
                 "/api/conversation/message",
                 json={
                     "sessionId": session["sessionId"],
-                    "message": "Not this site",
+                    "message": "Nope",
                     "useBedrock": False,
                 },
             ).json()
@@ -680,6 +734,7 @@ class DurableRunApiTests(unittest.TestCase):
         self.assertEqual(first["run"]["status"], "waiting_for_location_confirmation")
         self.assertEqual(rejection["action"], "answered_from_memory")
         self.assertEqual(rejection["route"], "reject_location")
+        self.assertNotIn("review pack for Nope", rejection["assistantMessage"])
         self.assertIn("will not run", rejection["assistantMessage"])
         self.assertEqual(len(session_state["runs"]), 1)
         self.assertEqual(session_state["workingMemory"]["pendingUserAction"], "provide_corrected_location")

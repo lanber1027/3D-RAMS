@@ -144,6 +144,7 @@ def handle_conversation_message(
         return _start_over_response(session_id, cleaned, memory, config)
 
     previous_active_run_id = memory.get("activeRunId")
+    conversation_state = _conversation_state(orchestration, intent, route, tools_started=True)
     result = create_durable_run(
         session_id=session_id,
         message=cleaned,
@@ -160,11 +161,13 @@ def handle_conversation_message(
         metadata={
             "route": "start_run",
             "conversationOrchestrator": _orchestration_metadata(orchestration),
+            "conversationState": conversation_state,
             "runId": result.get("runId"),
             "runStatus": result.get("status"),
             "siteIntent": {
                 "hasLocationEvidence": intent.get("hasLocationEvidence"),
                 "namedSiteHint": intent.get("namedSiteHint"),
+                "vagueLocationHint": intent.get("vagueLocationHint"),
                 "unsafeIntent": intent.get("unsafeIntent"),
             },
         },
@@ -191,6 +194,7 @@ def handle_conversation_message(
         "action": "started_run",
         "route": route if route != "new_run" else "new_or_guarded_run",
         "assistantMessage": assistant_text,
+        "conversationState": conversation_state,
         "run": result,
         "runtime": _runtime_contract(config, "lambda-adapter-active"),
     }
@@ -200,7 +204,7 @@ def _classify_message(message: str, memory: dict[str, Any], intent: dict[str, An
     lower = message.lower().strip(" ?.!")
     pending = memory.get("pendingUserAction")
     has_location_evidence = bool(intent.get("hasLocationEvidence"))
-    has_site_signal = bool(intent.get("namedSiteHint") or has_location_evidence)
+    has_site_signal = _has_site_signal(intent)
     if lower in _GREETING_PHRASES:
         return "greeting"
     if lower in _HELP_PHRASES:
@@ -287,7 +291,9 @@ def _validated_route(
     route = str(orchestration.get("route") or deterministic_route).strip().lower().replace("-", "_")
     pending = memory.get("pendingUserAction")
     has_location_evidence = bool(intent.get("hasLocationEvidence"))
-    has_site_signal = bool(intent.get("namedSiteHint") or has_location_evidence)
+    has_site_signal = _has_site_signal(intent)
+    conversation_state = _conversation_state(orchestration, intent, route, tools_started=False)
+    state_intent = conversation_state.get("intent")
 
     if deterministic_route in {
         "status",
@@ -307,6 +313,19 @@ def _validated_route(
         if orchestration.get("shouldStartRun") is False:
             return "conversation"
         return "new_run"
+    if (
+        orchestration.get("shouldStartRun") is False
+        and route in {"conversation", "greeting", "help", "follow_up", "status"}
+        and not intent.get("namedSiteHint")
+        and not has_location_evidence
+    ):
+        return route
+    if (
+        state_intent == "location_discovery"
+        and intent.get("vagueLocationHint")
+        and orchestration.get("shouldStartRun") is not False
+    ):
+        return "new_run"
     if has_site_signal and deterministic_route in {"new_run", "location_correction", "start_over_with_site"}:
         return deterministic_route
     if route in {"new_run", "location_correction", "start_over_with_site"}:
@@ -318,6 +337,14 @@ def _validated_route(
     if route in {"conversation", "greeting", "help", "follow_up", "status"}:
         return route
     return deterministic_route
+
+
+def _has_site_signal(intent: dict[str, Any]) -> bool:
+    return bool(
+        intent.get("namedSiteHint")
+        or intent.get("hasLocationEvidence")
+        or intent.get("vagueLocationHint")
+    )
 
 
 def _orchestrated_conversation_response(
@@ -338,6 +365,7 @@ def _orchestrated_conversation_response(
         memory_for_sanitize["pendingUserAction"] = pending_action
     text = _sanitize_assistant_copy(text, route=route, memory=memory_for_sanitize, intent=intent, tools_started=False)
     observability = _conversation_observability(route, orchestration, intent, memory, tools_started=False)
+    conversation_state = _conversation_state(orchestration, intent, route, tools_started=False)
     add_conversation_turn(
         session_id,
         role="assistant",
@@ -346,6 +374,7 @@ def _orchestrated_conversation_response(
             "route": route,
             "conversationOrchestrator": _orchestration_metadata(orchestration),
             "observability": observability,
+            "conversationState": conversation_state,
         },
         config=config,
     )
@@ -357,6 +386,7 @@ def _orchestrated_conversation_response(
         "action": "answered_from_memory",
         "route": route,
         "assistantMessage": text,
+        "conversationState": conversation_state,
         "observability": observability,
         "trace": _conversation_trace(route, orchestration, intent, memory, observability),
         "modelCalls": _conversation_model_calls(orchestration),
@@ -442,6 +472,7 @@ def _status_response(session_id: str, memory: dict[str, Any], intent: dict[str, 
         update_working_memory(session_id, config, latestRunStatus=status)
         tools_started = status in {"queued", "running", "completed"}
         observability = _conversation_observability("status", None, intent, memory, tools_started=tools_started)
+        conversation_state = _conversation_state(None, intent, "status", tools_started=tools_started)
         if tools_started:
             observability["phase"] = f"run_{status}"
             observability["noToolReason"] = None
@@ -450,6 +481,7 @@ def _status_response(session_id: str, memory: dict[str, Any], intent: dict[str, 
             "route": "status",
             "assistantMessage": text,
             "run": run,
+            "conversationState": conversation_state,
             "observability": observability,
             "trace": _conversation_trace("status", None, intent, memory, observability),
             "modelCalls": [],
@@ -458,10 +490,12 @@ def _status_response(session_id: str, memory: dict[str, Any], intent: dict[str, 
     text = "I do not have an active run in this session yet. Send a site visit request with a postcode or latitude/longitude to begin."
     add_conversation_turn(session_id, role="assistant", text=text, metadata={"route": "status"}, config=config)
     observability = _conversation_observability("status", None, intent, memory, tools_started=False)
+    conversation_state = _conversation_state(None, intent, "status", tools_started=False)
     return {
         "action": "answered_from_memory",
         "route": "status",
         "assistantMessage": text,
+        "conversationState": conversation_state,
         "observability": observability,
         "trace": _conversation_trace("status", None, intent, memory, observability),
         "modelCalls": [],
@@ -506,6 +540,7 @@ def _memory_response(
     else:
         text = "I do not have enough prior context in memory yet. Please send the site location and planned visit activity."
     observability = _conversation_observability("follow_up", orchestration, intent, memory, tools_started=False)
+    conversation_state = _conversation_state(orchestration, intent, "follow_up", tools_started=False)
     add_conversation_turn(
         session_id,
         role="assistant",
@@ -514,6 +549,7 @@ def _memory_response(
             "route": "follow_up",
             "followUpPrompt": message[:120],
             "conversationOrchestrator": _orchestration_metadata(orchestration),
+            "conversationState": conversation_state,
             "observability": observability,
         },
         config=config,
@@ -522,6 +558,7 @@ def _memory_response(
         "action": "answered_from_memory",
         "route": "follow_up",
         "assistantMessage": text,
+        "conversationState": conversation_state,
         "observability": observability,
         "trace": _conversation_trace("follow_up", orchestration, intent, memory, observability),
         "modelCalls": _conversation_model_calls(orchestration),
@@ -592,6 +629,96 @@ def _no_tool_started_copy(route: str, memory: dict[str, Any], intent: dict[str, 
     return "I can help with site-visit preparation. Please provide a trusted UK postcode or latitude/longitude and the planned visit activity before I run tools."
 
 
+def _conversation_state(
+    orchestration: dict[str, Any] | None,
+    intent: dict[str, Any],
+    route: str,
+    *,
+    tools_started: bool,
+) -> dict[str, Any]:
+    raw = (orchestration or {}).get("conversationState")
+    state = raw if isinstance(raw, dict) else {}
+    state_intent = str(state.get("intent") or _state_intent_from_route(route, intent, tools_started)).strip().lower().replace("-", "_")
+    location_status = str(state.get("locationStatus") or _location_status_from_intent(intent, state_intent, tools_started)).strip().lower().replace("-", "_")
+    known = state.get("knownDetails") if isinstance(state.get("knownDetails"), dict) else {}
+    missing = state.get("missingDetails") if isinstance(state.get("missingDetails"), list) else []
+    allowed_next_action = str(
+        state.get("allowedNextAction") or _allowed_next_action_from_state(state_intent, location_status, tools_started)
+    ).strip().lower().replace("-", "_")
+    return {
+        "intent": state_intent,
+        "locationStatus": location_status,
+        "knownDetails": {
+            "placeHint": known.get("placeHint") or intent.get("placeHint"),
+            "areaHint": known.get("areaHint") or intent.get("areaHint") or intent.get("nearestTown"),
+            "activity": known.get("activity") or (", ".join(intent.get("activities", [])) if intent.get("activities") else None),
+            "postcode": known.get("postcode") or intent.get("postcode") or intent.get("outcode"),
+            "coordinate": known.get("coordinate") or _coordinate_text(intent.get("coordinate")),
+            "siteName": known.get("siteName") or intent.get("siteName"),
+        },
+        "missingDetails": missing[:5] if missing else _missing_details_from_intent(intent, location_status),
+        "allowedNextAction": allowed_next_action,
+        "shouldStartRun": bool(state.get("shouldStartRun")) if "shouldStartRun" in state else tools_started,
+    }
+
+
+def _state_intent_from_route(route: str, intent: dict[str, Any], tools_started: bool) -> str:
+    if intent.get("unsafeIntent"):
+        return "unsafe"
+    if intent.get("vagueLocationHint") and not intent.get("hasLocationEvidence"):
+        return "location_discovery"
+    if route == "status":
+        return "status"
+    if route in {"reject_location", "location_correction", "start_over_with_site"}:
+        return "location_correction"
+    if route == "confirm_by_chat":
+        return "location_confirmation"
+    if tools_started:
+        return "ready_for_review"
+    return "conversation"
+
+
+def _location_status_from_intent(intent: dict[str, Any], state_intent: str, tools_started: bool) -> str:
+    if intent.get("unsafeIntent"):
+        return "unsafe"
+    if intent.get("hasLocationEvidence") and tools_started:
+        return "candidate_pending"
+    if state_intent == "location_discovery":
+        return "needs_evidence"
+    if state_intent in {"location_correction", "location_confirmation"}:
+        return "candidate_pending"
+    if tools_started:
+        return "candidate_pending"
+    return "not_applicable"
+
+
+def _allowed_next_action_from_state(state_intent: str, location_status: str, tools_started: bool) -> str:
+    if state_intent == "unsafe":
+        return "safety_refusal"
+    if tools_started:
+        return "start_guarded_run"
+    if location_status in {"vague", "needs_evidence"} or state_intent == "location_discovery":
+        return "ask_location_clarification"
+    if state_intent == "location_correction":
+        return "reject_location"
+    return "answer"
+
+
+def _missing_details_from_intent(intent: dict[str, Any], location_status: str) -> list[str]:
+    if location_status not in {"vague", "needs_evidence"}:
+        return []
+    missing = ["trusted postcode or latitude/longitude"]
+    if not intent.get("activities"):
+        missing.append("planned visit activity")
+    return missing
+
+
+def _coordinate_text(coordinate: Any) -> str | None:
+    if isinstance(coordinate, (list, tuple)) and len(coordinate) == 2:
+        return f"{coordinate[0]}, {coordinate[1]}"
+    return None
+
+
 def _conversation_observability(
     route: str,
     orchestration: dict[str, Any] | None,
@@ -602,7 +729,7 @@ def _conversation_observability(
 ) -> dict[str, Any]:
     pending = memory.get("pendingUserAction") or (orchestration or {}).get("pendingUserAction")
     has_location_evidence = bool(intent.get("hasLocationEvidence"))
-    has_site_signal = bool(intent.get("namedSiteHint") or has_location_evidence)
+    has_site_signal = _has_site_signal(intent)
     if tools_started:
         reason = "Backend durable run accepted; tool trace is attached to the run."
         phase = "running_tools"
@@ -658,6 +785,9 @@ def _conversation_trace(
                 "orchestratorReason": (orchestration or {}).get("reason"),
                 "activeRunId": memory.get("activeRunId"),
                 "siteName": intent.get("siteName"),
+                "placeHint": intent.get("placeHint"),
+                "areaHint": intent.get("areaHint"),
+                "vagueLocationHint": intent.get("vagueLocationHint"),
             },
             source_ids=["bedrock-conversation-orchestrator" if orchestration else "deterministic-router"],
         )
