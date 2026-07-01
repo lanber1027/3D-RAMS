@@ -1,8 +1,12 @@
 # Team Test Guide
 
-Use this guide to test the Demo1 flow before judging or submission. The app is intentionally local-first: it should run with public fixtures only, without Google Maps keys, Cesium ion tokens, live planning portals, client data, or real site data. Bedrock mode is available only when the AgentCore runtime has AWS credentials and `ENABLE_BEDROCK=true`; deterministic fallback remains available.
+Use this guide to test the Demo1 flow before judging or submission. The primary dogfood path is ASI/ASI:ONE or the hosted FieldBrief entry simulation when access exists. The local no-AWS path remains the baseline fallback: it should run with public fixtures only, without Google Maps keys, Cesium ion tokens, live planning portals, client data, or real site data. Bedrock mode is available only when the AgentCore runtime has AWS credentials and `ENABLE_BEDROCK=true`; deterministic fallback remains available.
 
-3D-RAMS turns a coordinate into an inspectable 3D pre-visit briefing pack. The default UI uses the cached `public-lambeth-thames` fixture pack for a Lambeth / Thames public-data example anchored on 8 Albert Embankment. It does not call live Planning Data, OpenStreetMap, Environment Agency, Lambeth, TfL, Google, or OS services during the demo.
+3D-RAMS turns a site request into an inspectable 3D pre-visit briefing pack. The current dogfood flow is:
+
+`ASI/ASI:ONE or hosted FieldBrief entry -> signed proxy -> asi_one_entry_agent -> rams_supervisor_runtime -> Harness subagents/shared tools -> run + structuredReport + delivery -> caseId report lookup -> frontend visualization/report lookup`.
+
+The default fixture path uses the cached `public-lambeth-thames` pack for a Lambeth / Thames public-data example anchored on 8 Albert Embankment. It does not call live Planning Data, OpenStreetMap, Environment Agency, Lambeth, TfL, Google, or OS services during the demo.
 
 1. coordinate input;
 2. selected fixture-pack lookup;
@@ -18,9 +22,53 @@ Use this guide to test the Demo1 flow before judging or submission. The app is i
 
 This is not certified RAMS, emergency guidance, work approval, or a competent-person replacement. Treat all output as a demo briefing for human review.
 
-## No-Code Codespaces Walkthrough
+## Hosted ASI/AgentCore Dogfood
 
-Recommended path: GitHub Codespaces. You do not need to install Python, Node, AWS tools, Google tools, or map keys locally if Codespaces works for your GitHub account.
+Use this path first when a maintainer has provided hosted access.
+
+What you need:
+
+- the hosted 3D-RAMS frontend URL or ASI/ASI:ONE entry access;
+- access to the signed entry proxy already configured by the project team;
+- demo-only public fixture input, not private site or client material.
+
+### Step 1: Open The Hosted Entry
+
+Open the hosted frontend or ASI/ASI:ONE entry supplied by the project team. The hosted frontend should be configured with `VITE_CLOUD_ENTRY_PROXY_URL` and should call the signed proxy, not local `/agentcore/invocations`.
+
+### Step 2: Start A Demo Request
+
+Use the default public Lambeth example or a safe demo request such as:
+
+```text
+Review 8 Albert Embankment for a survey pre-visit briefing.
+```
+
+Expected behavior: the entry agent confirms or clarifies the site, area scope, and goal before supervisor launch.
+
+### Step 3: Confirm And Review Output
+
+After confirmation, expected output includes a concise delivery summary, `caseId`, report link or case page, 3D visualization payload, evidence register, trace, safety boundary, and structured report data.
+
+### Step 4: Check Report Lookup
+
+Open the case/report link if available. The lookup should use the signed entry proxy and `caseId` report access context. `caseId` is a correlation id, not a bearer secret; production access is ASI/ASI:ONE identity-bound.
+
+### Step 5: Optional Hosted Smoke
+
+Maintainers can run the hosted parity smoke when cloud resources are configured:
+
+```bash
+RAMS_HOSTED_FRONTEND_URL=https://<amplify-app-url> \
+RAMS_HOSTED_ENTRY_URL=https://<signed-proxy-domain>/invoke \
+python3 scripts/hosted-agentcore-asio-smoke.py
+```
+
+This smoke covers entry clarification, confirmed supervisor launch, report-store write, identity-bound lookup behavior, authorized/denied material references, runtime mode assertions, and public-safe output.
+
+## Local Fallback Codespaces Walkthrough
+
+Use this when hosted ASI/ASI:ONE access is unavailable, slow, or out of scope. You do not need to install Python, Node, AWS tools, Google tools, or map keys locally if Codespaces works for your GitHub account.
 
 What you need:
 
@@ -40,7 +88,7 @@ You should see folders such as `.devcontainer`, `app`, `frontend`, `docs`, `fixt
 
 On the GitHub repo page, click:
 
-`Code -> Codespaces -> Create codespace on main`
+`Code -> Codespaces -> Create codespace on <branch being tested>`
 
 GitHub will open a browser-based VS Code-like workspace. It may look technical, but you only need the terminal once.
 
@@ -143,7 +191,7 @@ On a fresh Windows clone, use:
 powershell -ExecutionPolicy Bypass -File scripts/check-demo.ps1 -Install
 ```
 
-This check starts local AgentCore and frontend preview servers, then shuts them down. It does not use AWS, Google Maps, live planning portals, hosted infrastructure, real site data, or secrets.
+This check starts local AgentCore and frontend preview servers, then shuts them down. It does not use AWS, Google Maps, live planning portals, hosted infrastructure, real site data, or secrets. It verifies the fallback/baseline path, not hosted ASI/ASI:ONE access.
 
 ## Plain-English Repo Map
 
@@ -156,6 +204,7 @@ This check starts local AgentCore and frontend preview servers, then shuts them 
 | `scripts/start-dev.sh` | One-command startup script for Codespaces. |
 | `scripts/check-demo.sh` / `scripts/check-demo.ps1` | One-command local verification scripts for tests, evaluation, frontend build, and runtime smoke. |
 | `scripts/smoke-runtime.py` | No-AWS HTTP smoke test for AgentCore health, invocation, and frontend preview shell. |
+| `scripts/hosted-agentcore-asio-smoke.py` | Hosted ASI/AgentCore parity smoke when signed proxy and cloud resources are configured. |
 | `docs/team-test-guide.md` | This testing checklist. |
 | `.github/ISSUE_TEMPLATE` | Feedback form for teammate testing. |
 | `.devcontainer` | Codespaces setup recipe. |
@@ -168,7 +217,7 @@ For the AgentCore invocation fields and validation behavior, see [api-contract.m
 
 ## Local Setup
 
-Run this only if Codespaces is unavailable or slow.
+Run this only if hosted access and Codespaces are unavailable or slow.
 
 AgentCore runtime:
 

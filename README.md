@@ -57,22 +57,22 @@ No canonical product flow depends on `/api/chat`, `/api/run`, `/api/session/star
 | 3D viewer | Real React/Vite + CesiumJS UI | Uses a token-free Cesium canvas plus local scene overlay and annotations. |
 | Geospatial features | Cached-public or mocked fixture | Default pack uses cached public-source metadata; synthetic fallback uses `fixtures/geospatial_features.json`. |
 | Planning/context notes | Cached-public or synthetic fixture | Default pack uses cached public-safe notes and source metadata; synthetic fallback uses `fixtures/planning_report.txt`. |
-| AWS | Partially live when configured | Bedrock briefing, AgentCore runtimes, Harnesses, signed proxy, and DynamoDB report store can be configured; default teammate testing remains no-AWS. |
+| AWS | Partially live when configured | Bedrock briefing, AgentCore runtimes, Harnesses, signed proxy, and DynamoDB report store can be configured; no-AWS remains the fallback baseline. |
 | Google Maps / Earth / 3D Tiles | Not used | Kept out of Demo1 to avoid key, cost, licensing, and freshness risk. |
 
 ## Quickstart
 
 ## Teammate Testing
 
-The easiest teammate test path is GitHub Codespaces. Open the repo in Codespaces, then run:
+Use ASI/ASI:ONE or the hosted FieldBrief entry simulation first when access exists. For the no-AWS fallback, open the repo in GitHub Codespaces, then run:
 
 ```bash
 bash scripts/start-dev.sh
 ```
 
-Codespaces should forward the frontend on port `5173` and AgentCore runtime on port `8080`. Use [docs/team-test-guide.md](docs/team-test-guide.md) for the scenario checklist and feedback template.
+Codespaces should forward the frontend on port `5173` and AgentCore runtime on port `8080`. Use [docs/team-test-guide.md](docs/team-test-guide.md) for the hosted dogfood path, fallback scenario checklist, and feedback template.
 
-No AWS, Google Maps, Cesium ion token, or real site data is required.
+The fallback path requires no AWS, Google Maps, Cesium ion token, or real site data.
 
 The UI defaults to the cached `public-lambeth-thames` pack. Use the `Data pack` control to switch to the older synthetic fixture path.
 
