@@ -8,9 +8,17 @@ assignees: ""
 
 ## Environment
 
-- Test mode: Codespaces / local
+- Hosted URL opened? Yes / No / Not tested
+- Access code accepted? Yes / No / Not tested
 - Browser:
-- Operating system, if local:
+- Operating system / device:
+- Tester alias used, if any:
+
+## Optional Local Maintainer Details
+
+Skip this section if you tested only the hosted URL.
+
+- Test mode: Codespaces / local
 - Did Codespaces work? Yes / No / Not tested
 - Did setup work on the first try? Yes / No
 - Frontend opened on port `5173`? Yes / No / Not tested
@@ -30,24 +38,25 @@ Optional but useful if you are comfortable using the terminal.
 
 | Scenario | Pass / Fail / Not Tested | Notes |
 | --- | --- | --- |
-| Happy path | | |
-| Cached public pack | | |
-| Synthetic fallback pack | | |
-| Missing planning fixture | | |
-| Map fallback | | |
-| Bedrock disabled/fallback | | |
+| Hosted access-code session | | |
+| 8 Albert Embankment happy path | | |
+| Postcode or coordinate candidate confirmation | | |
+| Unknown named site asks for location detail | | |
+| Candidate card blocks tools until confirmation | | |
+| 3D scene or labelled fallback | | |
+| Risk cards and evidence register | | |
+| Agent state panel: route, pending action, memory, quality gate | | |
+| Trace / Architecture visualizer | | |
 | Safety refusal | | |
-| Low-confidence annotation | | |
-| Architecture visualizer | | |
 | Mobile usability | | |
 
 ## Bugs Or Failures
 
-Describe any broken behavior, console errors, backend errors, blank views, slow steps, or confusing results.
+Describe any broken behavior, console errors, backend errors, blank views, slow steps, stale panels, repeated messages, or confusing results.
 
 ## Confusing Parts
 
-What was unclear in setup, UI wording, scenario flow, evidence, trace, safety boundary, or architecture visualizer?
+What was unclear in setup, UI wording, location confirmation, Agent state, evidence, trace, safety boundary, or architecture visualizer?
 
 ## Screenshots Or Recording
 

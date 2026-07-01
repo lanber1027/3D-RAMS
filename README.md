@@ -4,7 +4,7 @@
 
 3D-RAMS is a hosted pre-visit agent product that turns a natural-language site visit request with a confirmed location into an inspectable 3D review pack.
 
-The current V3 rebuild makes chat the primary interface: a tester asks for a site visit briefing, the backend resolves or confirms the site first, then runs server-side tools and updates the UI with a 3D risk scene, evidence register, trace, confidence/fallback notes, safety gate, and RAMS-style review pack for human review. Bedrock access stays server-side.
+The current V3 rebuild makes chat the primary interface: a tester asks for a site visit briefing, the backend resolves or confirms the site first, then runs server-side tools and updates the UI with a 3D risk scene, evidence register, Agent state panel, trace, confidence/fallback notes, safety gate, and RAMS-style review pack for human review. Bedrock access stays server-side.
 
 ## Two Ways To Use 3D-RAMS
 
@@ -44,7 +44,7 @@ The current implementation adds bounded conversation memory and guarded routing 
 5. If candidates exist, the UI asks the user to confirm a candidate location; if not, it asks for postcode, coordinate, nearest town/road, or local authority and may show a clearly provisional checklist.
 6. Only after a confirmed location does the agent register uploaded evidence metadata and run allowlisted location, context, map, risk, briefing, and safety tools.
 7. Backend optionally calls Amazon Bedrock server-side when enabled.
-8. UI updates chat, 3D scene, risk cards, evidence, trace, and safety boundary.
+8. UI updates chat, 3D scene, risk cards, evidence, Agent state, trace, and safety boundary.
 9. Session/run metadata is shaped for DynamoDB evaluation tracing.
 
 ## Real vs Mocked
@@ -52,9 +52,10 @@ The current implementation adds bounded conversation memory and guarded routing 
 | Component | Demo1 Status | Notes |
 | --- | --- | --- |
 | Agent workflow | Real Python code | Chat session, tool sequence, evidence, trace, safety gate, deterministic fallback, and response shape are implemented. |
-| Conversation memory/router | Active AgentCore-ready rebuild slice | The hosted Lambda adapter now keeps bounded recent turns and structured working memory so follow-up/status questions do not silently start fake site runs. Managed AgentCore Runtime/Memory activation remains a gated AWS step. |
-| Intent and safety parser | Real V3.1 control flow | Extracts clean site labels, coordinates/postcodes, nearest-town clues, site/activity type, and unsafe certification/approval intent before tool execution. |
-| Location-resolution loop | Real V3.1 control flow with fixture-first and postcode-source resolver | Recognizable named-site prompts do not silently map to Lambeth. Candidate locations require user confirmation before the review workflow starts. Postcode/outcode clues can create source-labelled Postcodes.io candidates server-side; name-only prompts ask for stronger location evidence. |
+| Conversation memory/router | Active AgentCore-ready rebuild slice | The hosted Lambda adapter keeps bounded recent turns and structured working memory so follow-up/status questions do not silently start fake site runs. The UI now exposes route, pending action, active run, bounded memory, and evaluator state. Managed AgentCore Runtime/Memory activation remains a gated AWS step. |
+| Agent state panel | Live hosted MVP UI | Shows latest route, pending action, active run, storage mode, recent bounded session turns, and evaluator/quality-loop state. This is session memory and trace visibility, not long-term personal memory. |
+| Intent and safety parser | Real V3.2 control flow | Extracts clean site labels, coordinates/postcodes, nearest-town clues, site/activity type, and unsafe certification/approval intent before tool execution. |
+| Location-resolution loop | Real V3.2 control flow with fixture-first and postcode-source resolver | Recognizable named-site prompts do not silently map to Lambeth. Candidate locations require user confirmation before the review workflow starts. Postcode/outcode clues can create source-labelled Postcodes.io candidates server-side; name-only prompts ask for stronger location evidence. |
 | Provisional risk profiles | Real rule layer, not site evidence | Coordinate-backed arbitrary sites get site/activity-specific provisional prompts, such as solar/PV, quarry, drainage/slope, roof, substation/BESS, delivery, and access-track checks. These are labelled provisional, not evidence-backed site findings. |
 | Public data pack | Cached public fixture plus live-map option | `fixtures/public-lambeth-thames` remains the deterministic fallback. When `ENABLE_LIVE_MAP_FEATURES=true`, the backend can fetch live Planning Data and OSM/Overpass features after location confirmation. |
 | Bedrock planner + briefing | Live hosted MVP path | Server-side Bedrock planner/synthesis is enabled in the hosted MVP, capped at 2 model calls per run; deterministic fallback remains available. |
@@ -72,7 +73,7 @@ Hosted MVP URL: <https://main.d62sagixyhsmv.amplifyapp.com>
 
 Ask the maintainer for the private test access code. Do not commit, paste into public issues, or share the code outside the test group.
 
-The hosted product path is documented in [docs/hosted-aws-product.md](docs/hosted-aws-product.md). Use [docs/team-test-guide.md](docs/team-test-guide.md) for the current scenario checklist and feedback rules.
+The hosted product path is documented in [docs/hosted-aws-product.md](docs/hosted-aws-product.md). Use [docs/team-test-guide.md](docs/team-test-guide.md) for the current scenario checklist, including Agent state, memory routing, location confirmation, and feedback rules.
 
 Runtime V3 work is isolated on `feature/durable-runs-tool-loop`. It adds durable run APIs, checkpointed tool execution, polling/reconnect UX, a 3-phase model-budget design, and a location-resolution/confirmation loop before review generation. See [docs/durable-runtime-v2.md](docs/durable-runtime-v2.md).
 

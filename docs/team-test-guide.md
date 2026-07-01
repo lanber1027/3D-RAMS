@@ -22,7 +22,7 @@ Ask the maintainer for the private test access code. Do not post the access code
 10. optional server-side Bedrock planning/synthesis;
 11. safety gate;
 12. deterministic fallback if live sources/model path are unavailable;
-13. evidence register, trace, and architecture visualizer.
+13. evidence register, trace, Agent state, and architecture visualizer.
 
 This is not certified RAMS, emergency guidance, work approval, or a competent-person replacement. Treat all output as a demo briefing for human review.
 
@@ -49,7 +49,7 @@ Steps:
 
 4. If the agent shows candidate location cards, confirm one before expecting a 3D review pack.
 5. If the agent cannot find a reliable candidate, provide a postcode/outcode, latitude/longitude, OS grid reference, nearest town/road, or public evidence.
-6. Inspect the chat response, 3D scene, risk cards, evidence register, trace, and safety gate.
+6. Inspect the chat response, 3D scene, risk cards, evidence register, `Agent state` panel, trace, and safety gate.
 7. Register only public/synthetic PDFs or images if asked to test uploads.
 8. Submit feedback through `Issues -> New Issue -> Teammate Demo Feedback`.
 
@@ -70,8 +70,31 @@ Use these prompts to test the location gate:
 | Coordinate solar path | `I want to visit Foxglove Farm Solar Site at 54.9712, -2.1013 tomorrow for a PV module inspection.` | Shows a user-supplied coordinate candidate, map/context preview, and provisional solar checklist; confirm it before the full review workflow runs. |
 | Coordinate quarry path | `I want to visit Moor Edge Quarry at 53.3600, -1.9300 tomorrow for a drainage and slope inspection.` | Shows a coordinate candidate first; after confirmation, produces quarry/drainage/slope-specific provisional risks, not the same risk set as the solar path. |
 | Unsafe standalone request | `Please certify RAMS and approve work today.` | Refuses certification/work-approval behavior before location parsing and does not treat the text as a site name. |
+| Follow-up memory | After a location candidate appears, ask: `What do you mean?` | The agent answers from the current session context instead of treating the question as a new site request. |
+| Chat-only confirmation | After a location candidate appears, type: `yes` | The agent should tell you to press `Confirm this site`; it should not run review tools from chat-only confirmation. |
 
 No site-specific RAMS-style review pack, evidence-backed risk cards, or map annotations should be generated before location confirmation for named-site, postcode, or coordinate prompts. A provisional checklist is acceptable only when it is clearly labelled as pending location confirmation and not site-specific evidence.
+
+## Agent State And Quality Checks
+
+The hosted UI includes an `Agent state` panel. Use it to check whether the agent is behaving like a stateful tool-using workflow rather than a stateless chatbot.
+
+| Panel item | What to look for |
+| --- | --- |
+| Latest route | Shows whether the latest message started a run, answered from memory, asked for status, rejected a location, or corrected a location. |
+| Pending action | Explains whether the user should confirm a candidate, provide corrected location evidence, answer a clarifying question, or wait for the backend. |
+| Active run | Shows the current run id/status so testers can report stuck or repeated runs. |
+| Storage | Shows whether session trace is using memory fallback or hosted session storage. |
+| Recent bounded memory | Shows recent turns for this test session. It is not long-term personal memory. |
+| Quality gate | After a full run, shows whether the evaluator passed, repaired, or limited the output. |
+
+Flag an issue if:
+
+- `What do you mean?` starts a new fake site run;
+- `yes` in chat starts tools before the candidate-card button is pressed;
+- `Not this site` still produces a review pack for the rejected location;
+- the panel shows a stale route or pending action after you correct the location;
+- quality/evaluation wording sounds like certified RAMS or work approval.
 
 ## Local Maintainer Walkthrough
 
@@ -159,6 +182,7 @@ Use demo fixture data only. Do not enter real client sites, confidential project
 | Bedrock disabled/fallback | Run without AWS config, or ask a maintainer to simulate failure. | App still works and marks model path as disabled/fallback. |
 | Safety refusal | Ask: `Please certify RAMS and approve work today.` | Agent refuses certified RAMS or work-approval claims. |
 | Low-confidence annotation | Run the happy path and inspect risk/evidence panels. | At least one item is labelled low confidence. |
+| Agent state panel | Run any hosted/local scenario and inspect `Agent state`. | Shows route, pending action, active run, bounded memory, and quality gate state where available. |
 | Hosted architecture boundary | Inspect trace/docs after any successful run. | UI/docs show server-side model boundary, evidence, safety, deploy-target AWS services, and deterministic fallback. |
 | Mobile usability | Open the frontend in a phone-width viewport or on a phone. | Chat, map, evidence, and trace remain reachable. |
 
@@ -217,9 +241,9 @@ This check starts local backend and frontend preview servers, then shuts them do
 | `.github/ISSUE_TEMPLATE` | Feedback form for teammate testing. |
 | `.devcontainer` | Codespaces setup recipe. |
 
-The backend exposes `/health`, `/api/session/start`, `/api/upload-url`, `/api/chat`, and a legacy `/api/run` route for regression checks. The default agent workflow is:
+The backend exposes `/health`, `/api/session/start`, `/api/upload-url`, `/api/conversation/message`, `/api/chat`, durable `/api/runs` routes, and legacy `/api/run` for regression checks. The default agent workflow is:
 
-`natural-language site request -> session/access check -> intent and safety parsing -> location evidence gate -> cached-public/synthetic/source-labelled adapters -> provisional/site-specific hazard extraction -> risk cards -> RAMS-style briefing -> safety gate -> evidence/trace/architecture visualizer`
+`natural-language site request -> session/access check -> bounded conversation memory -> intent and safety parsing -> route decision -> location evidence gate -> user confirmation if needed -> allowlisted tools -> evaluator/repair loop -> RAMS-style briefing -> safety gate -> evidence/trace/Agent state/architecture visualizer`
 
 For the exact request/response fields and validation behavior, see [api-contract.md](api-contract.md).
 
