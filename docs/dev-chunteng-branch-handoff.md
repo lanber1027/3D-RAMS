@@ -32,7 +32,7 @@ Evan can continue product prototype work independently. This branch should absor
 - Added case-correlated report lookup through the entry/proxy path.
 - Added AgentVerse/ASI-facing adapter and signed proxy code under `agentverse/`.
 - Added cloud frontend wiring through `VITE_CLOUD_ENTRY_PROXY_URL`.
-- Added a frontend Bedrock toggle; demo default is `useBedrock: false` for stable no-Bedrock cloud workflow smoke.
+- Added a frontend Bedrock toggle; the explicit debug FieldBrief path now defaults to `useBedrock: true`, with the toggle still available for no-Bedrock smoke runs.
 - Added AgentCore/ASI architecture ADRs through ADR 0016.
 - Fixed the hosted proxy CORS issue caused by duplicate CORS headers between Lambda Function URL config and Lambda response headers.
 - Verified a hosted no-Bedrock path can reach the entry runtime, launch the supervisor runtime, invoke Harness subagents, store a report, and render a case page.

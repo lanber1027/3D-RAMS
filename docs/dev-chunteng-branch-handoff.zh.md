@@ -32,7 +32,7 @@ Evan 可以继续独立推进产品原型。这个分支应该持续吸收稳定
 - 加入通过 entry/proxy 路径进行的 case-correlated report lookup。
 - 在 `agentverse/` 下加入 AgentVerse/ASI adapter 和 signed proxy。
 - 前端通过 `VITE_CLOUD_ENTRY_PROXY_URL` 走云端 entry proxy。
-- 前端加入 Bedrock 开关；demo 默认 `useBedrock: false`，用于稳定跑 no-Bedrock cloud workflow smoke。
+- 前端加入 Bedrock 开关；显式 debug FieldBrief 路径现在默认 `useBedrock: true`，仍可通过开关跑 no-Bedrock smoke。
 - 新增/整理 AgentCore/ASI 相关 ADR，到 ADR 0016。
 - 修复 hosted proxy 的 CORS 问题：Lambda Function URL 已配置 CORS 时，Lambda response 不再重复写 CORS header。
 - 已验证 hosted no-Bedrock path 可以到 entry runtime，启动 supervisor runtime，调用 Harness subagents，存储 report，并渲染 case page。

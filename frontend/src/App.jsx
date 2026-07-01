@@ -20,7 +20,7 @@ const CLOUD_ENTRY_PROXY_URL = import.meta.env.VITE_CLOUD_ENTRY_PROXY_URL || "";
 const USE_LOCAL_ASIONE = import.meta.env.VITE_USE_LOCAL_ASIONE === "true";
 const ENTRY_AGENT_URL = USE_LOCAL_ASIONE ? import.meta.env.VITE_LOCAL_ASIONE_URL || AGENTCORE_URL : CLOUD_ENTRY_PROXY_URL;
 const REPORT_LOOKUP_URL = USE_LOCAL_ASIONE ? AGENTCORE_URL : ENTRY_AGENT_URL;
-const FIELD_BRIEF_LABEL = "FieldBrief ASI Simulation";
+const FIELD_BRIEF_LABEL = "Dev FieldBrief ASI Simulation";
 const STARTER_PROMPT =
   "I want to visit 8 Albert Embankment tomorrow for a survey within a 2km radius. Please prepare a pre-visit RAMS-style review pack.";
 const REPORT_ACCESS_SCHEMA_VERSION = "3d-rams.report-access.v1";
@@ -34,7 +34,7 @@ const DEFAULT_REQUEST = {
   fixturePack: "public-lambeth-thames",
   includePlanningFixture: true,
   simulateMapFailure: false,
-  useBedrock: false,
+  useBedrock: true,
   additionalRequest: "",
 };
 
@@ -524,7 +524,7 @@ function App() {
     {
       id: "welcome",
       role: "assistant",
-      text: "Tell me where you are going and what kind of site visit you are planning. I will ask for missing critical details, run tools, and return a RAMS-style review pack for human review.",
+      text: "Dev/debug ASI simulation only. ASI:ONE is the real user entry; use this panel to test intake, confirmation, and report handoff behavior.",
     },
   ]);
   const [uploads, setUploads] = useState([]);
@@ -670,7 +670,7 @@ function App() {
         sourceSystem: "fieldbrief-dev",
         type: "application/pdf",
         label: `Test evidence ${current.length + 1}`,
-        summary: "Local demo evidence metadata registered by the FieldBrief ASI simulation.",
+        summary: "Local dev material-reference metadata registered by the FieldBrief ASI simulation.",
         sizeBytes: 1024,
         access: { mode: "fieldbrief_mock_reference" },
       },
@@ -684,7 +684,7 @@ function App() {
       {
         id: "welcome",
         role: "assistant",
-        text: "Tell me where you are going and what kind of site visit you are planning. I will ask for missing critical details, run tools, and return a RAMS-style review pack for human review.",
+        text: "Dev/debug ASI simulation only. ASI:ONE is the real user entry; use this panel to test intake, confirmation, and report handoff behavior.",
       },
     ]);
     setUploads([]);
@@ -695,16 +695,13 @@ function App() {
     if (window.location.pathname.startsWith("/case/")) {
       window.history.replaceState(null, "", "/");
     }
-    sendToFieldBrief(STARTER_PROMPT, false);
   }
 
   useEffect(() => {
     const routeCaseId = caseIdFromPath();
     if (routeCaseId) {
       loadCaseReport(routeCaseId);
-      return;
     }
-    sendToFieldBrief(STARTER_PROMPT, false);
   }, []);
 
   return (
@@ -712,9 +709,9 @@ function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">3D-RAMS AgentCore Workflow</p>
-          <h1>Pre-Visit FieldBrief ASI Simulation</h1>
+          <h1>3D-RAMS Report Console</h1>
           <p className="topbar-summary">
-            Development view for the ASI/ASI:ONE entry path. The entry agent confirms intake before the supervisor returns map, evidence, trace, and safety output.
+            Report and debug surface for ASI:ONE-led workflows. Open FieldBrief only as an Evan/dev ASI simulation; root page load does not start an entry run.
           </p>
         </div>
         <div className="status-stack">
@@ -792,7 +789,7 @@ function App() {
             <div className="upload-strip">
               <button className="secondary" type="button" onClick={registerMockUpload}>
                 <FileUp size={16} />
-                Register test PDF/image
+                Register test material ref
               </button>
               <label className="toggle-control">
                 <input
@@ -802,7 +799,7 @@ function App() {
                 />
                 <span>Use Bedrock</span>
               </label>
-              <span>{uploads.length ? `${uploads.length} evidence file(s) registered` : "Uploads use S3 when hosted; local testing registers metadata only."}</span>
+              <span>{uploads.length ? `${uploads.length} material reference(s) registered` : "Dev metadata only; ASI:ONE owns real material ingestion."}</span>
             </div>
             <form className="composer" onSubmit={sendMessage}>
               <textarea ref={composerRef} value={prompt} onChange={(event) => setPrompt(event.target.value)} />
