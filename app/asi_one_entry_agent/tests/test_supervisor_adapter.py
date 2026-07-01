@@ -16,6 +16,7 @@ for app_root in (TOOLS_ROOT, SUPERVISOR_APP_ROOT, ENTRY_APP_ROOT):
     if str(app_root) not in sys.path:
         sys.path.insert(0, str(app_root))
 
+from agentcore_client import extract_text_body  # noqa: E402
 from main import handle_invocation, invoke_local  # noqa: E402
 from supervisor_core.agentcore_adapter import handle_invocation as invoke_supervisor_local  # noqa: E402
 from supervisor_adapter import (  # noqa: E402
@@ -73,6 +74,13 @@ def confirmed_entry_payload() -> dict:
 
 
 class AgentVerseAdapterTests(unittest.TestCase):
+    def assert_user_readable_response(self, response: dict) -> str:
+        text = extract_text_body(json.dumps(response))
+        self.assertTrue(text.strip())
+        self.assertFalse(text.lstrip().startswith("{"))
+        self.assertNotIn('"entryAgent"', text)
+        return text
+
     def test_rejects_unconfirmed_entry_payload(self):
         payload = confirmed_entry_payload()
         payload["confirmedByUser"] = False
@@ -169,6 +177,7 @@ class AgentVerseAdapterTests(unittest.TestCase):
         self.assertTrue(output["structuredReport"]["visualization"]["annotations"])
         self.assertEqual(output["run"]["materialIngestion"]["accepted"], 1)
         self.assertIsNone(output["run"]["runtime"].get("localAsiOneSubstitute"))
+        self.assertIn("Cached public-source review pack", self.assert_user_readable_response(response))
 
     def test_entry_intake_clarifies_without_location(self):
         response = handle_invocation(
@@ -181,6 +190,7 @@ class AgentVerseAdapterTests(unittest.TestCase):
         self.assertEqual(response["output"]["reportStatus"], "entry_pending")
         self.assertEqual(entry["status"], "clarification_required")
         self.assertTrue(entry["clarifyingQuestions"])
+        self.assertIn("Which site", self.assert_user_readable_response(response))
 
     def test_entry_uses_llm_model_json_for_intake_when_available(self):
         def fake_model_json(prompt):
@@ -217,6 +227,7 @@ class AgentVerseAdapterTests(unittest.TestCase):
         self.assertEqual(entry["mode"], "llm-first-intake")
         self.assertEqual(entry["intakeMode"], "llm")
         self.assertEqual(entry["intake"]["locationText"], "Model Parsed Site")
+        self.assertIn("Model Parsed Site", self.assert_user_readable_response(response))
 
     def test_entry_raw_message_confirmation_then_launch(self):
         calls: list[dict] = []
@@ -262,8 +273,10 @@ class AgentVerseAdapterTests(unittest.TestCase):
 
         output = response["output"]
         self.assertEqual(output["reportStatus"], "blocked")
+        self.assertIn("assistantMessage", output)
         self.assertEqual(output["entryAgent"]["status"], "blocked")
         self.assertIn("RAMS_SUPERVISOR_RUNTIME_ARN", output["runtime"]["fallbackReason"])
+        self.assertIn("could not launch", self.assert_user_readable_response(response))
 
     def test_entry_invalid_model_output_returns_structured_fallback_response(self):
         response = handle_invocation(

@@ -200,6 +200,7 @@ def handle_invocation(
 def _blocked_entry_output(payload: dict[str, Any], reason: str) -> dict[str, Any]:
     runtime_options = payload.get("runtimeOptions") if isinstance(payload.get("runtimeOptions"), dict) else {}
     conversation_id = str(payload.get("conversationId") or payload.get("sessionId") or "frontend-demo-session")
+    assistant_message = "I could not launch the supervisor workflow because the entry payload failed validation."
     return {
         "output": {
             "caseId": payload.get("caseId"),
@@ -208,6 +209,7 @@ def _blocked_entry_output(payload: dict[str, Any], reason: str) -> dict[str, Any
             "structuredReport": None,
             "reportStatus": "blocked",
             "workflowMode": "entry_intake",
+            "assistantMessage": assistant_message,
             "runtime": {
                 "bedrockRequested": bool(runtime_options.get("useBedrock", True)),
                 "bedrockEnabled": False,
@@ -220,7 +222,7 @@ def _blocked_entry_output(payload: dict[str, Any], reason: str) -> dict[str, Any
                 "adapterVersion": "asi-one-entry-agent-v2",
                 "conversationId": conversation_id,
                 "status": "blocked",
-                "assistantMessage": "I could not launch the supervisor workflow because the entry payload failed validation.",
+                "assistantMessage": assistant_message,
                 "fallbackReason": reason,
                 "intake": None,
             },
