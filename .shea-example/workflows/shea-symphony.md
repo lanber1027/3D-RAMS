@@ -58,7 +58,7 @@ workspace:
   base_branch: dev-chunteng
 main_lane:
   backend: codex
-  max_concurrent_agents: 1
+  max_concurrent_agents: 3
   max_turns: 3
   max_retry_backoff_ms: 300000
 tmux:
