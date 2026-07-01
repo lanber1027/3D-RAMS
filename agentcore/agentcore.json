@@ -88,6 +88,10 @@
       "path": "app/rams_hazard_harness"
     },
     {
+      "name": "rams_open_web_harness",
+      "path": "app/rams_open_web_harness"
+    },
+    {
       "name": "rams_annotation_harness",
       "path": "app/rams_annotation_harness"
     },

@@ -22,6 +22,7 @@ from rams_agent_tools.tools import (
     load_planning_context,
     resolve_location,
     safety_gate,
+    search_open_web_signals,
     trace_step,
 )
 
@@ -60,6 +61,14 @@ class SubagentInvoker(Protocol):
         features: list[dict[str, Any]],
         *,
         fixture_pack: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        ...
+
+    def invoke_open_web(
+        self,
+        location: dict[str, Any],
+        request: dict[str, Any],
+        area_scope: dict[str, Any] | None,
     ) -> dict[str, Any]:
         ...
 
@@ -162,6 +171,24 @@ class DirectSubagentInvoker:
             trace=trace,
             warnings=_warnings_from_trace(trace),
             metadata=_harness_metadata({}, fixture_pack),
+        )
+
+    def invoke_open_web(
+        self,
+        location: dict[str, Any],
+        request: dict[str, Any],
+        area_scope: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        open_web, step = search_open_web_signals(location, request, area_scope)
+        trace = [step]
+        return build_harness_output(
+            "open_web_subagent",
+            status="ok" if open_web.get("status") == "ok" else "warning",
+            summary="Collected bounded open-web signals as non-authoritative review context.",
+            data={"openWeb": open_web},
+            trace=trace,
+            warnings=_warnings_from_trace(trace),
+            metadata=_harness_metadata(request, None),
         )
 
     def invoke_annotation(
@@ -295,6 +322,26 @@ class AgentCoreHarnessInvoker:
                 "features": features,
                 "fixturePack": _fixture_pack_name(fixture_pack),
                 "requiredDataKeys": DOMAIN_DATA_KEYS["hazard_subagent"],
+            },
+        )
+
+    def invoke_open_web(
+        self,
+        location: dict[str, Any],
+        request: dict[str, Any],
+        area_scope: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        return self._invoke_json(
+            "open_web_subagent",
+            {
+                "task": (
+                    "Search optional Tavily/open-web context for the resolved site. "
+                    "Return JSON only and keep results non-authoritative."
+                ),
+                "location": location,
+                "request": request,
+                "areaScope": area_scope or {},
+                "requiredDataKeys": DOMAIN_DATA_KEYS["open_web_subagent"],
             },
         )
 
@@ -475,6 +522,12 @@ class AgentCoreHarnessInvoker:
                 _list(payload.get("features")),
                 fixture_pack=fixture_pack,
             )
+        if group == "open_web_subagent":
+            return direct.invoke_open_web(
+                _dict(payload.get("location")),
+                _dict(payload.get("request")),
+                _dict(payload.get("areaScope")),
+            )
         if group == "annotation_subagent":
             return direct.invoke_annotation(_dict(payload.get("location")), _list(payload.get("hazards")))
         if group == "briefing_subagent":
@@ -527,6 +580,7 @@ def _load_harness_arns() -> dict[str, str]:
         "rams_geospatial_harness": "RAMS_GEOSPATIAL_HARNESS_ARN",
         "rams_planning_harness": "RAMS_PLANNING_HARNESS_ARN",
         "rams_hazard_harness": "RAMS_HAZARD_HARNESS_ARN",
+        "rams_open_web_harness": "RAMS_OPEN_WEB_HARNESS_ARN",
         "rams_annotation_harness": "RAMS_ANNOTATION_HARNESS_ARN",
         "rams_briefing_harness": "RAMS_BRIEFING_HARNESS_ARN",
         "rams_review_harness": "RAMS_REVIEW_HARNESS_ARN",
@@ -671,6 +725,14 @@ def _execute_inline_tool(name: str, payload: dict[str, Any]) -> dict[str, Any]:
             fixture_pack=fixture_pack,
         )
         return {"hazards": hazards, "trace": [step]}
+    if name == "search_open_web_signals":
+        open_web, step = search_open_web_signals(
+            _dict(payload.get("location")),
+            _dict(payload.get("request")),
+            _dict(payload.get("areaScope")),
+            max_results=payload.get("maxResults") if isinstance(payload.get("maxResults"), int) else None,
+        )
+        return {"openWeb": open_web, "trace": [step]}
     if name == "ingest_material_references":
         result = ingest_material_references(
             payload.get("materials"),

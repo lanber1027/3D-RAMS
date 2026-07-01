@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "search_open_web_signals input",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "location": {
+      "type": "object",
+      "description": "Resolved site location from the geospatial subagent."
+    },
+    "request": {
+      "type": "object",
+      "description": "Normalized user request summary."
+    },
+    "areaScope": {
+      "type": ["object", "null"],
+      "description": "Optional review area scope, normally a radius in meters."
+    },
+    "maxResults": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "maximum": 10,
+      "description": "Optional bounded open-web result limit."
+    }
+  },
+  "required": ["location", "request"]
+}

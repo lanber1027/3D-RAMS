@@ -16,6 +16,11 @@ SUPERVISOR_HARNESS_SUBAGENTS = {
         "phase": "evidence_synthesis",
         "dependsOn": ["geospatial_subagent", "planning_subagent"],
     },
+    "open_web_subagent": {
+        "harness": "rams_open_web_harness",
+        "phase": "parallel_evidence_synthesis",
+        "dependsOn": ["geospatial_subagent", "planning_subagent"],
+    },
     "annotation_subagent": {
         "harness": "rams_annotation_harness",
         "phase": "parallel_report_preparation",
@@ -51,6 +56,9 @@ SUPERVISOR_TOOL_GROUPS = {
     ],
     "material_ingestion": [
         "ingest_material_references",
+    ],
+    "open_web_subagent": [
+        "search_open_web_signals",
     ],
     "annotation_subagent": [
         "create_annotations",

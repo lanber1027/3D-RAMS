@@ -55,6 +55,7 @@ def build_agentcore_invocation(entry_payload: dict[str, Any]) -> dict[str, Any]:
         "caseId": case_id,
         "siteName": _site_name(location_text, location_candidate),
         "goal": user_goal,
+        "areaScope": area_scope,
         "additionalRequest": _additional_request(intake),
         "materials": safe_materials,
         "upstream": {

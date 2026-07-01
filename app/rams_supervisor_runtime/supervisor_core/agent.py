@@ -107,12 +107,45 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
     material_sources = _dict_list(material_result.get("sources"), "material_ingestion", "sources")
 
     sequential_groups = subagent_plan["sequentialGroups"]
-    hazard_result = subagents.invoke_hazard(planning_text, features, fixture_pack=fixture_pack)
-    subagent_outputs.append(hazard_result)
+    evidence_groups = [
+        group for group in sequential_groups if group in {"hazard_subagent", "open_web_subagent"}
+    ] or ["hazard_subagent", "open_web_subagent"]
+    trace.append(
+        trace_step(
+            "dispatch_parallel_evidence_synthesis",
+            "ok",
+            "Supervisor dispatched hazard extraction and optional open-web signals in parallel.",
+            {
+                "mode": subagents.execution_mode,
+                "groups": evidence_groups,
+                "harnesses": {
+                    "hazard_subagent": harness_for_group("hazard_subagent"),
+                    "open_web_subagent": harness_for_group("open_web_subagent"),
+                },
+                "plannerMode": planner_result["activeAgentMode"],
+                "caseId": case_id,
+            },
+        )
+    )
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="rams-evidence-tools") as executor:
+        hazard_future = executor.submit(subagents.invoke_hazard, planning_text, features, fixture_pack=fixture_pack)
+        open_web_future = executor.submit(
+            subagents.invoke_open_web,
+            location,
+            request_summary,
+            request_summary.get("areaScope"),
+        )
+
+        hazard_result = hazard_future.result()
+        open_web_result = open_web_future.result()
+
+    subagent_outputs.extend([hazard_result, open_web_result])
     hazard_data = harness_data(hazard_result)
+    open_web_data = harness_data(open_web_result)
     hazards = _dict_list(hazard_data.get("hazards"), "hazard_subagent", "hazards")
     hazards.extend(material_findings)
     trace.extend(_trace_steps(hazard_result.get("trace"), "hazard_subagent"))
+    trace.extend(_trace_steps(open_web_result.get("trace"), "open_web_subagent"))
 
     report_groups = subagent_plan["reportParallelGroups"]
     trace.append(
@@ -171,7 +204,7 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
         planner_status=planner_result["plannerStatus"],
     )
     sources.extend(material_sources)
-    external_signals = {"openWeb": {"status": "not_configured", "items": []}}
+    external_signals = {"openWeb": _open_web_payload(open_web_data.get("openWeb"))}
     reasoning_result = reason_over_evidence(
         request=request_summary,
         location=location,
@@ -191,7 +224,7 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
     runtime = config.public_runtime(status=bedrock_status, fallback_reason=runtime_fallback_reason)
     runtime["fixturePack"] = fixture_pack["name"] if fixture_pack else None
     runtime["fixturePackMode"] = "cached-public-fixture" if fixture_pack else "synthetic-default"
-    runtime["liveApiCalls"] = False
+    runtime["liveApiCalls"] = bool(external_signals["openWeb"].get("liveCallAttempted"))
     runtime["subagentExecutionMode"] = subagents.execution_mode
     runtime["plannerMode"] = planner_result["plannerStatus"]
     runtime["activeAgentMode"] = planner_result["activeAgentMode"]
@@ -280,6 +313,23 @@ def _runtime_fallback_reason(planner_result: dict[str, Any], briefing_reason: st
     if briefing_reason:
         reasons.append(str(briefing_reason))
     return "; ".join(dict.fromkeys(reasons)) or None
+
+
+def _open_web_payload(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {"status": "not_configured", "provider": "tavily", "items": [], "warnings": []}
+    payload = dict(value)
+    payload.setdefault("status", "not_configured")
+    payload.setdefault("provider", "tavily")
+    payload.setdefault("sourceBoundary", "non_authoritative_signal")
+    payload.setdefault("items", [])
+    payload.setdefault("warnings", [])
+    payload.setdefault("liveCallAttempted", False)
+    if not isinstance(payload.get("items"), list):
+        payload["items"] = []
+    if not isinstance(payload.get("warnings"), list):
+        payload["warnings"] = []
+    return payload
 
 
 def _trace_steps(value: Any, source: str) -> list[dict[str, Any]]:

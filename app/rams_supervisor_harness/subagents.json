@@ -4,7 +4,7 @@
   "notes": [
     "Each subagent is an AgentCore Harness resource registered in agentcore/agentcore.json.",
     "Local Demo1 runtime may still use direct supervisor calls until deployed Harness invocation is wired.",
-    "Open-web/Tavily work is intentionally omitted until credential and source-boundary decisions are made."
+    "Open-web/Tavily work is optional, environment-gated, and treated as non-authoritative signal context."
   ],
   "subagents": [
     {
@@ -30,6 +30,14 @@
       "allowedTools": ["extract_hazard_notes"],
       "dependsOn": ["geospatial_subagent", "planning_subagent"],
       "outputs": ["hazards", "trace"]
+    },
+    {
+      "id": "open_web_subagent",
+      "harness": "rams_open_web_harness",
+      "phase": "parallel_evidence_synthesis",
+      "allowedTools": ["search_open_web_signals"],
+      "dependsOn": ["geospatial_subagent", "planning_subagent"],
+      "outputs": ["openWeb", "trace"]
     },
     {
       "id": "annotation_subagent",
@@ -63,7 +71,7 @@
     },
     {
       "step": "evidence_synthesis",
-      "parallel": ["hazard_subagent"]
+      "parallel": ["hazard_subagent", "open_web_subagent"]
     },
     {
       "step": "parallel_report_preparation",

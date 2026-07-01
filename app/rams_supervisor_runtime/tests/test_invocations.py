@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -163,6 +164,54 @@ class AgentCoreInvocationTests(unittest.TestCase):
         self.assertTrue(material_evidence[0]["citations"])
         self.assertFalse(material_evidence[0]["citations"][0]["rawContentStored"])
         self.assertTrue(any(finding["id"].startswith("material-asio-material-site-access-plan") for finding in report["findings"]))
+
+    def test_invocation_structured_report_includes_mock_open_web_signals(self):
+        secret = "dummy-report-tavily-secret"
+        mock_results = json.dumps(
+            {
+                "results": [
+                    {
+                        "title": f"Public access article {secret}",
+                        "url": "https://news.example.org/3d-rams-public-access",
+                        "content": f"Public article snippet with {secret} scrubbed.",
+                        "score": 0.77,
+                        "published_date": "2026-06-20",
+                    }
+                ]
+            }
+        )
+        with patch.dict(
+            "os.environ",
+            {
+                "TAVILY_MOCK_RESPONSE": "true",
+                "TAVILY_API_KEY": secret,
+                "TAVILY_MOCK_RESULTS_JSON": mock_results,
+            },
+        ):
+            response = invoke_local(
+                {
+                    "input": {
+                        "caseId": "case_open_web_report_001",
+                        "fixturePack": "public-lambeth-thames",
+                        "useBedrock": False,
+                        "areaScope": {"type": "radius", "meters": 25},
+                    }
+                }
+            )
+
+        output = response["output"]
+        run = output["run"]
+        report = output["structuredReport"]
+        section_statuses = {section["id"]: section["status"] for section in report["sections"]}
+
+        self.assertEqual(run["externalSignals"]["openWeb"]["status"], "ok")
+        self.assertEqual(report["externalSignals"]["openWeb"]["status"], "ok")
+        self.assertTrue(report["dataQuality"]["completeness"]["hasOpenWebSignals"])
+        self.assertEqual(section_statuses["open-web-signals"], "ready")
+        self.assertFalse(run["runtime"]["liveApiCalls"])
+        serialized = json.dumps(output)
+        self.assertNotIn(secret, serialized)
+        self.assertIn("[redacted]", serialized)
 
     def test_bedrock_fallback_reason_reaches_structured_report_data_quality(self):
         with patch.dict(

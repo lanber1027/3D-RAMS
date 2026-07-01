@@ -381,13 +381,14 @@ class SiteBriefingAgentTests(unittest.TestCase):
         self.assertEqual(result["runtime"]["harnessOutputSchemaVersion"], HARNESS_OUTPUT_SCHEMA_VERSION)
         self.assertTrue(result["runtime"]["harnessContract"]["contractCompliant"])
         self.assertEqual(result["runtime"]["harnessContract"]["fallbackCount"], 0)
-        self.assertEqual(len(result["subagentOutputs"]), 5)
+        self.assertEqual(len(result["subagentOutputs"]), 6)
         self.assertEqual(
             result["runtime"]["harnessContract"]["observedSubagents"],
             [
                 "geospatial_subagent",
                 "planning_subagent",
                 "hazard_subagent",
+                "open_web_subagent",
                 "annotation_subagent",
                 "briefing_subagent",
             ],
@@ -397,6 +398,19 @@ class SiteBriefingAgentTests(unittest.TestCase):
             self.assertEqual(output["schemaVersion"], HARNESS_OUTPUT_SCHEMA_VERSION)
             self.assertIsInstance(output["data"], dict)
             self.assertIsInstance(output["trace"], list)
+
+    def test_open_web_mock_populates_external_signals_without_live_api(self):
+        with EnvPatch(TAVILY_MOCK_RESPONSE="true", TAVILY_API_KEY=None):
+            result = run_site_briefing({"fixturePack": "public-lambeth-thames", "useBedrock": False})
+
+        open_web = result["externalSignals"]["openWeb"]
+        self.assertEqual(open_web["status"], "ok")
+        self.assertEqual(open_web["mode"], "mock")
+        self.assertTrue(open_web["items"])
+        self.assertFalse(result["runtime"]["liveApiCalls"])
+        self.assertTrue(
+            any(step["name"] == "search_open_web_signals" and step["status"] == "ok" for step in result["trace"])
+        )
 
     def test_agentcore_harness_non_standard_output_uses_visible_contract_fallback(self):
         class FakeHarnessClient:

@@ -1,0 +1,76 @@
+{
+  "name": "rams_open_web_harness",
+  "model": {
+    "provider": "bedrock",
+    "modelId": "amazon.nova-micro-v1:0",
+    "apiFormat": "converse_stream"
+  },
+  "systemPrompt": "You are the 3D-RAMS open-web signals specialist Harness. Use only search_open_web_signals. Return bounded public web/news/post signals as non-authoritative review context, never as professional RAMS evidence, emergency guidance, legal advice, or approval to work. Keep output UI-safe and log-safe; never include credentials, API keys, signed URLs, private material content, raw web pages, or hidden reasoning. Return exactly one JSON object with schemaVersion 3d-rams.harness-output.v1. Put open-web payloads under data.openWeb and include subagent, status, summary, evidence, findings, trace, references, warnings, errors, and metadata.",
+  "tools": [
+    {
+      "type": "inline_function",
+      "name": "search_open_web_signals",
+      "config": {
+        "inlineFunction": {
+          "description": "Search public web/news/post context through Tavily when enabled, otherwise return a clear disabled/not-configured payload.",
+          "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "search_open_web_signals input",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "location": {
+                "type": "object",
+                "description": "Resolved site location from the geospatial subagent."
+              },
+              "request": {
+                "type": "object",
+                "description": "Normalized user request summary."
+              },
+              "areaScope": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Optional review area scope, normally a radius in meters."
+              },
+              "maxResults": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1,
+                "maximum": 10,
+                "description": "Optional bounded open-web result limit."
+              }
+            },
+            "required": [
+              "location",
+              "request"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "skills": [],
+  "allowedTools": [
+    "search_open_web_signals"
+  ],
+  "memory": {
+    "mode": "disabled"
+  },
+  "maxIterations": 4,
+  "maxTokens": 6000,
+  "timeoutSeconds": 180,
+  "truncation": {
+    "strategy": "summarization"
+  },
+  "environmentVariables": {
+    "RUNTIME_DATA_MODE": "fixture_first",
+    "ENABLE_TAVILY": "false",
+    "TAVILY_MAX_RESULTS": "5",
+    "TAVILY_TIMEOUT_SECONDS": "20",
+    "TAVILY_SEARCH_DEPTH": "basic"
+  }
+}

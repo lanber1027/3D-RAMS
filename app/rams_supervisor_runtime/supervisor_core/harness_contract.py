@@ -15,6 +15,7 @@ DOMAIN_DATA_KEYS = {
     "geospatial_subagent": ["location", "features", "scene"],
     "planning_subagent": ["planningText"],
     "hazard_subagent": ["hazards"],
+    "open_web_subagent": ["openWeb"],
     "annotation_subagent": ["annotations"],
     "briefing_subagent": ["briefing", "evidence", "bedrockStatus", "bedrockFallbackReason"],
     "review_guardrail": ["safety", "reviewDecision"],

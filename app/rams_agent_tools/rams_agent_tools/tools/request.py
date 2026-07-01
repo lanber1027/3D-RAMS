@@ -11,6 +11,8 @@ def normalize_request(request: dict[str, Any]) -> dict[str, Any]:
     agent_mode = str(request.get("agentMode") or request.get("agent_mode") or "llm-planner").strip().lower()
     case_id = request.get("caseId") or None
     materials = sanitize_material_references(request.get("materials"))
+    upstream = request.get("agentcoreUpstream") if isinstance(request.get("agentcoreUpstream"), dict) else {}
+    area_scope = request.get("areaScope") or upstream.get("areaScope")
     if case_id:
         for material in materials:
             material.setdefault("caseId", case_id)
@@ -28,10 +30,21 @@ def normalize_request(request: dict[str, Any]) -> dict[str, Any]:
         "additionalRequest": request.get("additionalRequest") or "",
         "materials": materials,
     }
+    if isinstance(area_scope, dict) and area_scope:
+        normalized["areaScope"] = _area_scope(area_scope)
     access_context = request.get("accessContext")
     if isinstance(access_context, dict):
         normalized["accessContext"] = access_context
     return normalized
+
+
+def _area_scope(value: dict[str, Any]) -> dict[str, Any]:
+    scope_type = str(value.get("type") or "radius").strip() or "radius"
+    try:
+        meters = int(float(value.get("meters", 0)))
+    except (TypeError, ValueError):
+        meters = 0
+    return {"type": scope_type, "meters": meters} if meters > 0 else {"type": scope_type}
 
 
 def source_register(

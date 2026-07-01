@@ -144,13 +144,14 @@ def _default_plan() -> dict[str, Any]:
     return {
         "rationale": "Use the standard 3D-RAMS bounded Harness workflow for a complete review pack.",
         "initialParallelGroups": ["geospatial_subagent", "planning_subagent"],
-        "sequentialGroups": ["hazard_subagent", "review_guardrail"],
+        "sequentialGroups": ["hazard_subagent", "open_web_subagent", "review_guardrail"],
         "reportParallelGroups": ["annotation_subagent", "briefing_subagent"],
         "requiredEvidence": [
             "resolved location",
             "geospatial features",
             "planning context",
             "candidate hazards",
+            "open-web public signals",
             "3D annotations",
             "evidence-backed briefing",
             "independent review gate",

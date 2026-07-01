@@ -11,6 +11,7 @@ AWS_TRACE_MAPPING = {
     "load_planning_context": "CloudWatch span: tool.load_planning_context",
     "extract_hazard_notes": "Bedrock/CloudWatch span: tool.extract_hazard_notes",
     "ingest_material_references": "CloudWatch span: tool.ingest_material_references",
+    "search_open_web_signals": "CloudWatch span: tool.search_open_web_signals",
     "create_annotations": "CloudWatch span: tool.create_annotations",
     "generate_site_brief": "Bedrock/CloudWatch span: tool.generate_site_brief",
     "plan_subagent_workflow": "Bedrock/CloudWatch span: supervisor.plan_subagent_workflow",
