@@ -37,6 +37,8 @@ class RuntimeConfig:
     bedrock_temperature: float
     bedrock_mock_response: bool
     bedrock_simulate_failure: bool
+    material_extraction_model_id: str
+    material_extraction_max_tokens: int
 
     @classmethod
     def from_env(cls, *, request_bedrock: bool = True) -> "RuntimeConfig":
@@ -55,6 +57,12 @@ class RuntimeConfig:
             bedrock_temperature=_env_float("BEDROCK_TEMPERATURE", 0.2),
             bedrock_mock_response=_env_bool("BEDROCK_MOCK_RESPONSE", False),
             bedrock_simulate_failure=_env_bool("BEDROCK_SIMULATE_FAILURE", False),
+            material_extraction_model_id=(
+                os.getenv("MATERIAL_EXTRACTION_MODEL_ID")
+                or os.getenv("BEDROCK_MATERIAL_EXTRACTION_MODEL_ID")
+                or "amazon.nova-lite-v1:0"
+            ),
+            material_extraction_max_tokens=_env_int("MATERIAL_EXTRACTION_MAX_TOKENS", 900),
         )
 
     def public_runtime(self, *, status: str, fallback_reason: str | None = None) -> dict[str, object]:
@@ -68,5 +76,7 @@ class RuntimeConfig:
             "maxTokens": self.bedrock_max_tokens if self.bedrock_enabled else None,
             "maxModelCalls": self.bedrock_max_model_calls if self.bedrock_enabled else None,
             "temperature": self.bedrock_temperature if self.bedrock_enabled else None,
+            "materialExtractionModelId": self.material_extraction_model_id,
+            "materialExtractionMaxTokens": self.material_extraction_max_tokens if self.bedrock_enabled else None,
             "fallbackReason": fallback_reason,
         }

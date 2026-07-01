@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from datetime import datetime, timezone
 from typing import Any
 
+from ..bedrock_adapter import BedrockAdapterError, generate_bedrock_material_extraction
+from ..config import RuntimeConfig
 from .telemetry import trace_step
 
 
 MATERIAL_REFERENCE_SCHEMA_VERSION = "3d-rams.material-reference.v1"
 MATERIAL_INGESTION_SCHEMA_VERSION = "3d-rams.material-ingestion.v1"
 MAX_MATERIAL_BYTES = 10 * 1024 * 1024
+MAX_TEXT_MATERIAL_CHARS = 24000
 ALLOWED_MATERIAL_TYPES = {
     "application/pdf",
     "image/jpeg",
@@ -81,6 +86,7 @@ def ingest_material_references(
     *,
     case_id: str | None,
     upstream_context: dict[str, Any] | None = None,
+    config: RuntimeConfig | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Validate ASIO-owned material references and return safe evidence summaries.
@@ -88,8 +94,8 @@ def ingest_material_references(
     This local adapter deliberately does not fetch raw private files. It proves the
     contract with deterministic fixture extracts and safe pre-extracted summaries.
     """
-    reference_items = materials if isinstance(materials, list) else []
-    safe_references = sanitize_material_references(reference_items)
+    reference_items = [item for item in materials if isinstance(item, dict)] if isinstance(materials, list) else []
+    safe_references = [_sanitize_reference(item, index) for index, item in enumerate(reference_items)]
     current_time = now or datetime.now(timezone.utc)
     accepted: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -97,8 +103,10 @@ def ingest_material_references(
     evidence: list[dict[str, Any]] = []
     findings: list[dict[str, Any]] = []
     citations: list[dict[str, Any]] = []
+    extractions: list[dict[str, Any]] = []
 
     for index, reference in enumerate(safe_references):
+        raw_reference = reference_items[index]
         skip_reason = _skip_reason(reference, case_id=case_id, now=current_time)
         if skip_reason:
             skipped.append(_skipped_material(reference, skip_reason))
@@ -106,13 +114,16 @@ def ingest_material_references(
 
         extracted = _safe_extract(reference)
         if extracted is None:
-            skipped.append(_skipped_material(reference, "retrieval_not_configured"))
-            continue
+            extracted, skip_reason = _extract_retrieved_material(reference, raw_reference, config=config)
+            if extracted is None:
+                skipped.append(_skipped_material(reference, skip_reason or "extraction_skipped"))
+                continue
 
         source_id = f"material-{_slug(reference['materialId'])}"
         evidence_id = f"ev-{source_id}"
         material_citations = _citations(reference, source_id, extracted)
         citations.extend(material_citations)
+        extractions.append(_public_extraction(reference, source_id, evidence_id, extracted, material_citations))
 
         source = {
             "id": source_id,
@@ -121,7 +132,7 @@ def ingest_material_references(
             "status": extracted["status"],
             "origin": _origin(reference, extracted),
             "trustBoundary": "ASI/ASI:ONE material storage and authorization",
-            "awsMapping": "Future AgentCore material retrieval adapter plus CloudWatch source metadata",
+            "awsMapping": _aws_mapping(extracted),
             "material": _material_identity(reference),
         }
         sources.append(source)
@@ -138,6 +149,11 @@ def ingest_material_references(
             "why_it_matters": extracted["summary"],
             "citations": material_citations,
             "material": _material_identity(reference),
+            "extraction": {
+                "status": extracted["status"],
+                "confidence": extracted["confidence"],
+                "limitations": extracted.get("limitations", []),
+            },
         }
         evidence.append(evidence_item)
 
@@ -152,6 +168,7 @@ def ingest_material_references(
                     "evidenceIds": [evidence_id],
                     "confidence": observation["confidence"],
                     "note": observation["description"],
+                    "citationAnchor": observation.get("citationAnchor"),
                     "humanReviewRequired": True,
                 }
             )
@@ -167,6 +184,8 @@ def ingest_material_references(
                 "evidenceId": evidence_id,
                 "retrievalMode": extracted["retrievalMode"],
                 "status": extracted["status"],
+                "confidence": extracted["confidence"],
+                "limitations": extracted.get("limitations", []),
             }
         )
 
@@ -184,6 +203,7 @@ def ingest_material_references(
         "references": safe_references,
         "acceptedReferences": accepted,
         "skipped": skipped,
+        "extractions": extractions,
         "citations": citations,
         "sourceIds": [item["id"] for item in sources],
         "evidenceIds": [item["id"] for item in evidence],
@@ -204,6 +224,8 @@ def ingest_material_references(
                 "accepted": output["accepted"],
                 "skippedCount": output["skippedCount"],
                 "skipped": skipped,
+                "extractionStatuses": [item["status"] for item in extractions],
+                "materialExtractionModelId": config.material_extraction_model_id if config else None,
                 "citationCount": len(citations),
             },
             source_ids=output["sourceIds"],
@@ -254,7 +276,7 @@ def _safe_retrieval_descriptor(access: dict[str, Any]) -> dict[str, Any]:
 def _skip_reason(reference: dict[str, Any], *, case_id: str | None, now: datetime) -> str | None:
     material_type = str(reference.get("type") or "").lower()
     if material_type not in ALLOWED_MATERIAL_TYPES:
-        return "unsupported_type"
+        return "unsupported_format"
 
     size_bytes = reference.get("sizeBytes")
     if isinstance(size_bytes, int) and size_bytes > MAX_MATERIAL_BYTES:
@@ -324,6 +346,137 @@ def _safe_extract(reference: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _extract_retrieved_material(
+    reference: dict[str, Any],
+    raw_reference: dict[str, Any],
+    *,
+    config: RuntimeConfig | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    material_type = str(reference.get("type") or "").lower()
+    if material_type not in {"application/pdf", "text/plain", "text/markdown"}:
+        return None, "unsupported_format"
+
+    payload, payload_error = _retrieved_payload(raw_reference, material_type)
+    if payload_error:
+        return None, payload_error
+    if payload is None:
+        return None, "extraction_skipped"
+    if config is None or not config.bedrock_enabled:
+        return None, "model_not_configured"
+
+    try:
+        extraction, metadata = generate_bedrock_material_extraction(
+            config=config,
+            material_id=reference["materialId"],
+            label=reference["label"],
+            content_type=material_type,
+            text=payload.get("text"),
+            document_bytes=payload.get("bytes"),
+        )
+    except (BedrockAdapterError, Exception):
+        return None, "extraction_failed"
+
+    observations = extraction.get("observations") if isinstance(extraction.get("observations"), list) else []
+    return {
+        "status": str(extraction.get("status") or ("extracted" if observations else "no_relevant_content")),
+        "retrievalMode": "bedrock-material-extraction",
+        "summary": _text(extraction.get("summary")) or "Material extraction completed with no summary.",
+        "confidence": _confidence(extraction.get("confidence")),
+        "observations": [_material_observation(item, index) for index, item in enumerate(observations) if isinstance(item, dict)],
+        "citations": extraction.get("citations") if isinstance(extraction.get("citations"), list) else [],
+        "limitations": _string_list(extraction.get("limitations")),
+        "model": {
+            "provider": "amazon-bedrock",
+            "modelId": metadata.get("modelId"),
+            "awsRegion": metadata.get("awsRegion"),
+            "mode": metadata.get("mode"),
+            "maxTokens": metadata.get("maxTokens"),
+        },
+    }, None
+
+
+def _retrieved_payload(raw_reference: dict[str, Any], material_type: str) -> tuple[dict[str, Any] | None, str | None]:
+    retrieved = raw_reference.get("retrieved") if isinstance(raw_reference.get("retrieved"), dict) else {}
+    for key in ("retrievedMaterial", "retrieved_material"):
+        if isinstance(raw_reference.get(key), dict):
+            retrieved = raw_reference[key]
+            break
+
+    if material_type in {"text/plain", "text/markdown"}:
+        text = _first_text(
+            retrieved.get("text"),
+            retrieved.get("markdown"),
+            retrieved.get("contentText"),
+            raw_reference.get("text"),
+            raw_reference.get("markdown"),
+            raw_reference.get("contentText"),
+            raw_reference.get("rawContent"),
+        )
+        if text:
+            return {"text": text[:MAX_TEXT_MATERIAL_CHARS]}, None
+
+    data = _first_bytes(
+        retrieved.get("bytes"),
+        retrieved.get("contentBytes"),
+        raw_reference.get("bytes"),
+        raw_reference.get("contentBytes"),
+    )
+    if data is None:
+        encoded = _first_text(
+            retrieved.get("bytesBase64"),
+            retrieved.get("contentBase64"),
+            retrieved.get("contentBytesBase64"),
+            raw_reference.get("bytesBase64"),
+            raw_reference.get("contentBase64"),
+            raw_reference.get("contentBytesBase64"),
+        )
+        if encoded:
+            try:
+                data = base64.b64decode(encoded, validate=True)
+            except (binascii.Error, ValueError):
+                return None, "extraction_failed"
+    if data is not None:
+        if len(data) > MAX_MATERIAL_BYTES:
+            return None, "oversized"
+        return {"bytes": data}, None
+    return None, None
+
+
+def _material_observation(item: dict[str, Any], index: int) -> dict[str, Any]:
+    return {
+        "id": _text(item.get("id")) or f"observation-{index + 1}",
+        "title": (_text(item.get("title")) or f"Material observation {index + 1}")[:120],
+        "category": _category(item.get("category")),
+        "description": (_text(item.get("description")) or "Material observation extracted for human review.")[:240],
+        "confidence": _confidence(item.get("confidence")),
+        "citationAnchor": (_text(item.get("citationAnchor") or item.get("citation_anchor")) or "material evidence")[:120],
+    }
+
+
+def _public_extraction(
+    reference: dict[str, Any],
+    source_id: str,
+    evidence_id: str,
+    extracted: dict[str, Any],
+    citations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "materialId": reference["materialId"],
+        "label": reference["label"],
+        "sourceId": source_id,
+        "evidenceId": evidence_id,
+        "status": extracted["status"],
+        "retrievalMode": extracted["retrievalMode"],
+        "summary": extracted["summary"],
+        "confidence": extracted["confidence"],
+        "observations": extracted.get("observations", []),
+        "citations": citations,
+        "limitations": extracted.get("limitations", []),
+        "model": extracted.get("model"),
+        "rawContentStored": False,
+    }
+
+
 def _citations(reference: dict[str, Any], source_id: str, extracted: dict[str, Any]) -> list[dict[str, Any]]:
     citations = []
     for citation in extracted.get("citations", []):
@@ -377,7 +530,16 @@ def _origin(reference: dict[str, Any], extracted: dict[str, Any]) -> str:
         return "Deterministic fixture extract for an ASI-owned material reference; no raw upload storage in 3D-RAMS"
     if extracted["retrievalMode"] == "fieldbrief-mock-summary":
         return "FieldBrief development/mock material reference; metadata-only local testing path"
+    if extracted["retrievalMode"] == "bedrock-material-extraction":
+        model = extracted.get("model") if isinstance(extracted.get("model"), dict) else {}
+        return f"Authorized retrieved material extracted through Amazon Bedrock {model.get('modelId') or 'material model'}"
     return "ASI-owned authorized material reference with safe pre-extracted summary"
+
+
+def _aws_mapping(extracted: dict[str, Any]) -> str:
+    if extracted.get("retrievalMode") == "bedrock-material-extraction":
+        return "Amazon Bedrock Converse material extraction plus CloudWatch source metadata"
+    return "Future AgentCore material retrieval adapter plus CloudWatch source metadata"
 
 
 def _freshness(reference: dict[str, Any]) -> str:
@@ -441,6 +603,39 @@ def _text(value: Any) -> str | None:
         return None
     text = re.sub(r"\s+", " ", str(value)).strip()
     return text or None
+
+
+def _first_text(*values: Any) -> str | None:
+    for value in values:
+        text = _text(value)
+        if text:
+            return text
+    return None
+
+
+def _first_bytes(*values: Any) -> bytes | None:
+    for value in values:
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, bytearray):
+            return bytes(value)
+    return None
+
+
+def _confidence(value: Any) -> str:
+    confidence = str(value or "unknown").strip().lower()
+    return confidence if confidence in {"high", "medium", "low", "unknown"} else "unknown"
+
+
+def _category(value: Any) -> str:
+    category = str(value or "other").strip().lower()
+    return category if category in {"access", "buried_services", "planning", "environment", "hazard", "other"} else "other"
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip()[:180] for item in value if str(item).strip()][:5]
 
 
 def _non_negative_int(value: Any) -> int | None:

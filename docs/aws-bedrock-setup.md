@@ -32,6 +32,8 @@ AWS_REGION=eu-west-2
 BEDROCK_MODEL_ID=anthropic.claude-3-7-sonnet-20250219-v1:0
 BEDROCK_MAX_TOKENS=1200
 BEDROCK_TEMPERATURE=0.2
+MATERIAL_EXTRACTION_MODEL_ID=amazon.nova-lite-v1:0
+MATERIAL_EXTRACTION_MAX_TOKENS=900
 ```
 
 Bedrock remains disabled unless explicitly enabled:
@@ -67,15 +69,15 @@ If the script exits non-zero, the app can still run in deterministic mode.
 
 ## How The App Uses Bedrock
 
-3D-RAMS uses Bedrock only for one optional briefing-generation step:
+3D-RAMS uses Bedrock for optional bounded model steps when explicitly enabled:
 
-1. The deterministic agent prepares structured hazards, annotations, evidence, and limitations.
-2. The Bedrock adapter drafts a briefing from that structured evidence.
-3. The response is parsed and validated.
+1. The material adapter can extract bounded observations from already-authorized retrieved PDF/text material using `MATERIAL_EXTRACTION_MODEL_ID`, defaulting to Nova Lite.
+2. The briefing adapter can draft a briefing from structured evidence using `BEDROCK_MODEL_ID`.
+3. Responses are parsed, bounded, and validated before report use.
 4. The local safety gate still blocks certified RAMS, emergency guidance, work approval, and competent-person replacement claims.
-5. If Bedrock fails, returns invalid output, or is disabled, deterministic briefing fallback is used.
+5. If Bedrock fails, returns invalid output, or is disabled, deterministic briefing fallback remains available and material extraction returns explicit skipped/failure statuses.
 
-Bedrock is not the source of truth for evidence extraction in the current MVP. The evidence register and trace remain inspectable.
+Raw document text or binary content is not persisted in traces, reports, fixtures, or report-store payloads. The evidence register and trace remain inspectable with bounded observations, citations, limitations, and model metadata.
 
 ## Troubleshooting
 

@@ -101,6 +101,7 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
         request.get("materials"),
         case_id=case_id,
         upstream_context=upstream_context,
+        config=config,
     )
     trace.extend(_trace_steps(material_result.get("trace"), "material_ingestion"))
     material_findings = _dict_list(material_result.get("findings"), "material_ingestion", "findings")
@@ -415,6 +416,7 @@ def _material_public_result(material_result: dict[str, Any]) -> dict[str, Any]:
         "references",
         "acceptedReferences",
         "skipped",
+        "extractions",
         "citations",
         "sourceIds",
         "evidenceIds",

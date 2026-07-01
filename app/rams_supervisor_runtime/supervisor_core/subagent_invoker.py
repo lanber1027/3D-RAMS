@@ -734,10 +734,12 @@ def _execute_inline_tool(name: str, payload: dict[str, Any]) -> dict[str, Any]:
         )
         return {"openWeb": open_web, "trace": [step]}
     if name == "ingest_material_references":
+        config = RuntimeConfig.from_env(request_bedrock=bool(payload.get("useBedrock")))
         result = ingest_material_references(
             payload.get("materials"),
             case_id=str(payload.get("caseId")) if payload.get("caseId") else None,
             upstream_context=_dict(payload.get("upstream")),
+            config=config,
         )
         return result
     if name == "create_annotations":
