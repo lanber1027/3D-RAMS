@@ -102,12 +102,13 @@ def validate_intake_result(result: dict[str, Any], turn: dict[str, Any]) -> dict
 
     if status == "confirmation_required":
         response["confirmation"] = response["confirmation"] or {"summary": _confirmation_summary(intake)}
+        response["assistantMessage"] = _confirmation_message(intake)
         return response
 
     if turn["confirmedByUser"] is not True:
         response["status"] = "confirmation_required"
         response["confirmation"] = response["confirmation"] or {"summary": _confirmation_summary(intake)}
-        response["assistantMessage"] = "I have enough information. Please confirm that I should launch the supervisor run."
+        response["assistantMessage"] = _confirmation_message(intake)
         return response
 
     response["caseId"] = str(result.get("caseId") or generate_case_id(turn, intake))
@@ -429,6 +430,10 @@ def _confirmation_summary(intake: dict[str, Any]) -> str:
     meters = intake.get("areaScope", {}).get("meters")
     goal = intake.get("userGoal") or "pre-visit review"
     return f"Launch a 3D-RAMS supervisor review for {location}, covering a {meters}m radius for {goal}."
+
+
+def _confirmation_message(intake: dict[str, Any]) -> str:
+    return f"Please confirm the 3D-RAMS intake before proceeding.\n\n{_confirmation_summary(intake)}"
 
 
 def _default_message(status: str) -> str:

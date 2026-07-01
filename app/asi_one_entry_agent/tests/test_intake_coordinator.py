@@ -85,6 +85,25 @@ class IntakeCoordinatorTests(unittest.TestCase):
         with self.assertRaisesRegex(IntakeValidationError, "valid JSON"):
             coordinate_intake({"message": "8 Albert Embankment for 2km"}, model_json=lambda _: "not json")
 
+    def test_confirmation_message_includes_summary_when_model_message_is_empty_shell(self):
+        result = coordinate_intake(
+            {"message": "review 48 Quernmore Road within 800m", "conversationId": "c-empty-details"},
+            model_json=lambda _: {
+                "status": "confirmation_required",
+                "assistantMessage": "Please confirm the details below before proceeding.",
+                "intake": {
+                    "locationText": "48 Quernmore Road, London",
+                    "areaScope": {"type": "radius", "meters": 800},
+                    "userGoal": "confined workspace inspection readiness review",
+                    "materials": [],
+                },
+            },
+        )
+
+        self.assertEqual(result["status"], "confirmation_required")
+        self.assertIn("48 Quernmore Road", result["assistantMessage"])
+        self.assertIn("800m radius", result["assistantMessage"])
+
     def test_invalid_model_json_uses_deterministic_fallback(self):
         result = coordinate_intake(
             {
