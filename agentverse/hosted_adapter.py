@@ -2,6 +2,7 @@ import os
 import re
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 from urllib.parse import urlencode
 
 from agentcore_client import extract_json_body, extract_text_body, invoke_runtime_text
@@ -16,7 +17,7 @@ from uagents_core.contrib.protocols.chat import (
 
 AGENTCORE_RUNTIME_ARN = os.environ["AGENTCORE_RUNTIME_ARN"]
 AWS_REGION = os.environ.get("AWS_REGION", "eu-west-2")
-ADAPTER_VERSION = "agentcore-agentverse-adapter-v2"
+ADAPTER_VERSION = "agentcore-agentverse-adapter-v3"
 _PENDING_INTAKES = {}
 CASE_REF_RE = re.compile(r"(?:^|\s)/case/(case_[A-Za-z0-9_-]+)\b")
 
@@ -36,12 +37,12 @@ def _message_text(message: ChatMessage) -> str:
     return "\n".join(parts).strip()
 
 
-def _session_id(sender: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"agentverse:{ADAPTER_VERSION}:3d-rams:{sender}"))
+def _session_id(sender: str, message: Optional[ChatMessage] = None) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"agentverse:{ADAPTER_VERSION}:3d-rams:{_session_seed(sender, message)}"))
 
 
-def invoke_agentcore(prompt: str, sender: str) -> str:
-    session_id = _session_id(sender)
+def invoke_agentcore(prompt: str, sender: str, message: Optional[ChatMessage] = None) -> str:
+    session_id = _session_id(sender, message)
     user_id = f"agentverse-{sender[-48:]}"
     case_id = _case_id_from_prompt(prompt)
     payload = _report_lookup_payload(case_id, session_id) if case_id else _entry_turn_payload(prompt, session_id)
@@ -59,6 +60,38 @@ def invoke_agentcore(prompt: str, sender: str) -> str:
     _remember_pending_intake(session_id, response_text)
     reply = extract_text_body(response_text) or response_text
     return _append_full_report_link(reply, response_text, session_id)
+
+
+def _session_seed(sender: str, message: Optional[ChatMessage]) -> str:
+    for key in ("conversationId", "conversation_id", "sessionId", "session_id", "threadId", "thread_id"):
+        value = _find_message_value(message, key)
+        if value:
+            return str(value)
+    return sender
+
+
+def _find_message_value(value, key: str):
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        if value.get(key):
+            return value[key]
+        for child in value.values():
+            found = _find_message_value(child, key)
+            if found:
+                return found
+        return None
+    if isinstance(value, (list, tuple)):
+        for child in value:
+            found = _find_message_value(child, key)
+            if found:
+                return found
+        return None
+    if hasattr(value, key) and getattr(value, key):
+        return getattr(value, key)
+    if hasattr(value, "model_dump"):
+        return _find_message_value(value.model_dump(), key)
+    return None
 
 
 def _entry_turn_payload(prompt: str, session_id: str) -> dict:
@@ -163,7 +196,7 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
         reply = "Please send a text message."
     else:
         try:
-            reply = invoke_agentcore(prompt, sender)
+            reply = invoke_agentcore(prompt, sender, msg)
         except Exception as exc:  # noqa: BLE001 - return a safe user-facing adapter failure.
             ctx.logger.exception("AgentCore invocation failed")
             detail = str(exc).strip()

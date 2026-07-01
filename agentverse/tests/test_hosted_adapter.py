@@ -70,6 +70,18 @@ class HostedAdapterPayloadTests(unittest.TestCase):
 
         self.assertIn("Full report: https://example.test/case/case_ec2310c77382?reportSessionId=agentverse-session", text)
 
+    def test_session_id_prefers_message_conversation_id(self):
+        first = self.hosted_adapter._session_id("sender-a", {"conversationId": "conversation-1"})
+        second = self.hosted_adapter._session_id("sender-b", {"conversationId": "conversation-1"})
+
+        self.assertEqual(first, second)
+
+    def test_session_id_finds_nested_session_metadata(self):
+        first = self.hosted_adapter._session_id("sender-a", {"metadata": {"thread_id": "thread-1"}})
+        second = self.hosted_adapter._session_id("sender-b", {"metadata": {"thread_id": "thread-1"}})
+
+        self.assertEqual(first, second)
+
 
 def _install_uagents_stubs():
     if "uagents" in sys.modules:
