@@ -169,6 +169,88 @@ class AgentCoreInvocationTests(unittest.TestCase):
         self.assertTrue(material_evidence[0]["citations"])
         self.assertFalse(material_evidence[0]["citations"][0]["rawContentStored"])
         self.assertTrue(any(finding["id"].startswith("material-asio-material-site-access-plan") for finding in report["findings"]))
+        self.assertTrue(
+            any("Material access-plan review" in item for item in report["executiveSummary"]["priorityChecks"])
+        )
+
+    def test_report_store_persists_material_status_summary_without_sensitive_fields(self):
+        response = invoke_local(
+            {
+                "input": {
+                    "caseId": "case_material_store_status_001",
+                    "fixturePack": "public-lambeth-thames",
+                    "useBedrock": False,
+                    "materials": [
+                        {
+                            "materialId": "asio_material_site_access_plan",
+                            "sourceSystem": "asio",
+                            "type": "application/pdf",
+                            "label": "Site access plan",
+                            "summary": "Uploaded by the ASI user for this case.",
+                            "caseId": "case_material_store_status_001",
+                            "access": {
+                                "mode": "asio_authorized_reference",
+                                "expiresAt": "2099-01-01T00:00:00Z",
+                                "retrievalUrl": "https://materials.example.invalid/access-plan.pdf?token=secret-token",
+                            },
+                            "rawContent": "RAW PRIVATE MATERIAL SHOULD NOT PERSIST",
+                            "signedUrl": "https://example.invalid/file?X-Amz-Signature=secret",
+                        },
+                        {
+                            "materialId": "asio_material_denied",
+                            "sourceSystem": "asio",
+                            "type": "application/pdf",
+                            "label": "Denied material",
+                            "caseId": "case_material_store_status_001",
+                            "access": {"mode": "asio_authorized_reference", "status": "denied"},
+                        },
+                        {
+                            "materialId": "asio_material_unsupported",
+                            "sourceSystem": "asio",
+                            "type": "application/msword",
+                            "label": "Unsupported material",
+                            "caseId": "case_material_store_status_001",
+                            "access": {"mode": "asio_authorized_reference"},
+                        },
+                        {
+                            "materialId": "asio_material_extraction_failed",
+                            "sourceSystem": "asio",
+                            "type": "application/pdf",
+                            "label": "Extraction failed material",
+                            "caseId": "case_material_store_status_001",
+                            "access": {"mode": "asio_authorized_reference"},
+                        },
+                    ],
+                }
+            }
+        )
+        output = response["output"]
+        writes: list[dict] = []
+
+        class WriteTable:
+            def put_item(self, *, Item):
+                writes.append(Item)
+
+        persist_report(output, table=WriteTable())
+
+        item = writes[0]
+        summary = item["materialEvidenceSummary"]
+        self.assertEqual(summary["ingestionStatus"], "warning")
+        self.assertEqual(summary["accepted"], 1)
+        self.assertEqual(summary["skippedCount"], 3)
+        statuses = {entry["materialId"]: entry["status"] for entry in summary["items"]}
+        self.assertEqual(statuses["asio_material_site_access_plan"], "authorized-material-fixture")
+        self.assertEqual(statuses["asio_material_denied"], "denied")
+        self.assertEqual(statuses["asio_material_unsupported"], "unsupported")
+        self.assertEqual(statuses["asio_material_extraction_failed"], "extraction_failed")
+        reasons = {entry["materialId"]: entry.get("reason") for entry in summary["items"]}
+        self.assertEqual(reasons["asio_material_unsupported"], "unsupported_type")
+        self.assertEqual(reasons["asio_material_extraction_failed"], "extraction_failed")
+
+        serialized = json.dumps(item, default=str)
+        self.assertNotIn("signedUrl", serialized)
+        self.assertNotIn("secret-token", serialized)
+        self.assertNotIn("RAW PRIVATE MATERIAL SHOULD NOT PERSIST", serialized)
 
     def test_invocation_structured_report_includes_mock_open_web_signals(self):
         secret = "dummy-report-tavily-secret"
@@ -647,7 +729,7 @@ class AgentCoreInvocationTests(unittest.TestCase):
                             "summary": "Authorized ASI material reference for this case.",
                             "access": {
                                 "mode": "asio_authorized_reference",
-                                "expiresAt": "2026-06-30T18:00:00Z",
+                                "expiresAt": "2099-01-01T00:00:00Z",
                                 "status": "not_retrieved",
                             },
                             "signedUrl": "https://example.invalid/private-download",
@@ -685,7 +767,10 @@ class AgentCoreInvocationTests(unittest.TestCase):
         self.assertEqual(item["reportAccessBinding"]["mode"], "asi_session")
         self.assertIn("sessionIdHash", item["reportAccessBinding"])
         self.assertEqual(item["materialEvidenceSummary"]["status"], "references_recorded")
+        self.assertEqual(item["materialEvidenceSummary"]["accepted"], 1)
         self.assertEqual(item["materialEvidenceSummary"]["items"][0]["materialId"], "asio_material_001")
+        self.assertEqual(item["materialEvidenceSummary"]["items"][0]["status"], "authorized-material-summary")
+        self.assertEqual(item["materialEvidenceSummary"]["items"][0]["evidenceIds"], ["ev-material-asio-material-001"])
         self.assertNotIn("signedUrl", item["materialEvidenceSummary"]["items"][0])
         self.assertNotIn("signedUrl", item["run"]["request"]["materials"][0])
 

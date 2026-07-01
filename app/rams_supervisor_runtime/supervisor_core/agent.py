@@ -98,7 +98,7 @@ def run_site_briefing(request: dict[str, Any] | None = None) -> dict[str, Any]:
     trace.extend(_trace_steps(planning_result.get("trace"), "planning_subagent"))
 
     material_result = ingest_material_references(
-        request.get("materials"),
+        request_summary.get("materials"),
         case_id=case_id,
         upstream_context=upstream_context,
     )
@@ -392,6 +392,10 @@ def _merge_material_briefing(briefing: dict[str, Any], material_result: dict[str
         briefing["summary"].append(
             f"{len(accepted)} authorized material reference(s) produced safe evidence summaries for human review."
         )
+        for finding in _dict_list(material_result.get("findings"), "material_ingestion", "findings")[:3]:
+            title = str(finding.get("title") or "").strip()
+            if title:
+                briefing["priority_checks"].append(f"Review material-derived observation: {title}.")
         briefing["limitations"].append(
             "Material-derived output uses ASI/ASI:ONE-authorized summaries or fixtures; raw private material content is not stored in the report."
         )
