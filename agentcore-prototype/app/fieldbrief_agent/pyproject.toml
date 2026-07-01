@@ -1,0 +1,16 @@
+[project]
+name = "fieldbrief-agentcore-prototype"
+version = "0.1.0"
+description = "AgentCore sidecar prototype for the 3D-RAMS FieldBrief agent."
+requires-python = ">=3.10"
+dependencies = [
+  "boto3>=1.34",
+  "fastapi>=0.111",
+  "httpx>=0.27",
+  "pydantic>=2.7",
+]
+
+[tool.agentcore]
+entrypoint = "main.py"
+memory = "none"
+build = "CodeZip"

@@ -344,6 +344,41 @@ class ApiContractTests(unittest.TestCase):
         self.assertTrue(any(hazard["title"] == "PV electrical isolation and inverter interface" for hazard in hazards))
         self.assertTrue(any(hazard.get("dataMode") == "provisional-from-user-description" for hazard in hazards))
 
+    def test_chat_endpoint_coordinate_only_does_not_use_temporal_word_as_site_label(self):
+        fake_response = Mock()
+        fake_response.raise_for_status.return_value = None
+        fake_response.json.return_value = {
+            "status": 200,
+            "result": [
+                {
+                    "postcode": "BN2 0QU",
+                    "outcode": "BN2",
+                    "latitude": 50.825351,
+                    "longitude": -0.125125,
+                    "admin_district": "Brighton and Hove",
+                    "admin_ward": "Queen's Park",
+                    "region": "South East",
+                    "country": "England",
+                }
+            ],
+        }
+        with EnvPatch(ENABLE_BEDROCK="false", APP_ACCESS_TOKEN_HASH=None), patch("app.location_resolver.httpx.get", return_value=fake_response):
+            session = self.client.post("/api/session/start", json={"testerAlias": "qa"}).json()
+            response = self.client.post(
+                "/api/chat",
+                json={
+                    "sessionId": session["sessionId"],
+                    "message": "I want to visit 50.825351, -0.125125 tomorrow for a survey.",
+                    "useBedrock": False,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.json()
+        self.assertTrue(result["needsLocationConfirmation"])
+        self.assertEqual(result["locationCandidates"][0]["name"], "Coordinate 50.825351, -0.125125")
+        self.assertNotEqual(result["locationCandidates"][0]["name"].lower(), "tomorrow")
+
     def test_chat_endpoint_postcode_prompt_returns_source_labelled_candidate(self):
         fake_response = Mock()
         fake_response.raise_for_status.return_value = None

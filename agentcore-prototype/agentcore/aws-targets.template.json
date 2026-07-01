@@ -1,0 +1,8 @@
+{
+  "accountId": "<your-aws-account-id>",
+  "region": "eu-west-2",
+  "profile": "<your-local-aws-profile>",
+  "runtimeName": "3d-rams-fieldbrief-agent",
+  "deploymentMode": "parallel-prototype",
+  "trafficPolicy": "do-not-route-production-or-teammate-traffic-until-reviewed"
+}

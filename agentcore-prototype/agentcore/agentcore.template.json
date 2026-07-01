@@ -1,0 +1,26 @@
+{
+  "projectName": "3d-rams-fieldbrief-agentcore",
+  "status": "template-only",
+  "notes": [
+    "Use AgentCore CLI to generate the authoritative agentcore.json before deploy.",
+    "Keep memory disabled for the first runtime proof.",
+    "Do not switch the hosted teammate URL until the AgentCore endpoint passes smoke and quality review."
+  ],
+  "agents": [
+    {
+      "name": "fieldbrief-agent",
+      "framework": "custom-python",
+      "modelProvider": "Bedrock",
+      "build": "CodeZip",
+      "memory": "none",
+      "entrypoint": "app/fieldbrief_agent/main.py"
+    }
+  ],
+  "requiredRuntimeControls": {
+    "guardsFirst": true,
+    "accessControlOutsideRuntime": true,
+    "locationConfirmationBeforeTools": true,
+    "maxEvaluationLoops": 3,
+    "noCertifiedRamsOrWorkApproval": true
+  }
+}

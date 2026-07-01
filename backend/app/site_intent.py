@@ -37,6 +37,20 @@ _ACTIVITY_TERMS = {
     "electrical": ["electrical", "energised", "inverter", "transformer", "switchgear"],
 }
 
+_WEAK_SITE_LABELS = {
+    "today",
+    "tomorrow",
+    "next week",
+    "next month",
+    "survey",
+    "inspection",
+    "maintenance",
+    "delivery",
+    "this place",
+    "this site",
+    "the site",
+}
+
 
 def parse_site_intent(message: str) -> dict[str, Any]:
     cleaned = re.sub(r"\s+", " ", message).strip()
@@ -169,9 +183,14 @@ def extract_site_label(
         match = re.search(pattern, working, flags=re.IGNORECASE)
         if match:
             label = _clean_label(match.group(1))
-            if label:
+            if label and not _is_weak_site_label(label):
                 return label[:90] if len(label) <= 90 else label[:87].rstrip() + "..."
-    return _clean_label(working[:90])
+    if coordinate:
+        return f"Coordinate {coordinate[0]:.6f}, {coordinate[1]:.6f}"
+    if postcode:
+        return f"Postcode {postcode}"
+    label = _clean_label(working[:90])
+    return "" if _is_weak_site_label(label) else label
 
 
 def _matched_terms(lower_message: str, groups: dict[str, list[str]]) -> list[str]:
@@ -183,3 +202,10 @@ def _clean_label(value: str) -> str:
     label = re.sub(r"\s+", " ", label)
     label = re.sub(r"\s+\bat\b\s*$", "", label, flags=re.IGNORECASE)
     return label.strip(" ,.;:")
+
+
+def _is_weak_site_label(value: str) -> bool:
+    label = value.strip().lower()
+    if not label:
+        return True
+    return label in _WEAK_SITE_LABELS
