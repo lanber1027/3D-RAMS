@@ -288,6 +288,8 @@ def _text_from_json(payload: dict[str, Any]) -> str:
         return str(output["assistantMessage"])
     if summary.get("headline"):
         return str(summary["headline"])
+    if output.get("workflowMode") == "report_lookup":
+        return _report_lookup_message(output)
     if output:
         return json.dumps(output, ensure_ascii=False)
     return json.dumps(payload, ensure_ascii=False)
@@ -302,6 +304,59 @@ def _entry_agent_message(entry_agent: dict[str, Any]) -> str:
     if not question_lines:
         return message
     return f"{message}\n\n" + "\n".join(question_lines)
+
+
+def _report_lookup_message(output: dict[str, Any]) -> str:
+    case_id = str(output.get("caseId") or "unknown case")
+    status = str(output.get("reportStatus") or "unknown")
+    if status != "review_passed":
+        return f"Report lookup for /case/{case_id}: {status}."
+
+    report = output.get("structuredReport") if isinstance(output.get("structuredReport"), dict) else {}
+    review = output.get("reviewGate") if isinstance(output.get("reviewGate"), dict) else {}
+    executive = report.get("executiveSummary") if isinstance(report.get("executiveSummary"), dict) else {}
+    citations = output.get("citationMetadata") if isinstance(output.get("citationMetadata"), dict) else {}
+    findings = citations.get("findings") if isinstance(citations.get("findings"), list) else []
+    evidence = output.get("evidenceSummary") if isinstance(output.get("evidenceSummary"), list) else []
+
+    lines = [
+        f"Report /case/{case_id}: {status}.",
+        f"Review gate: {review.get('status') or 'unknown'}; safety level: {review.get('safetyLevel') or 'unknown'}; human review required: {bool(review.get('requiresHumanReview'))}.",
+    ]
+    if review.get("message"):
+        lines.append(str(review["message"]))
+
+    lines.append("\nTraceable hazards / priority checks:")
+    for item in _first_items(findings, executive.get("priorityChecks"), limit=5):
+        title = item.get("title") if isinstance(item, dict) else item
+        evidence_ids = item.get("evidenceIds") if isinstance(item, dict) else []
+        suffix = f" (evidence: {', '.join(map(str, evidence_ids[:3]))})" if evidence_ids else ""
+        lines.append(f"- {title}{suffix}")
+
+    lines.append("\nEvidence summary:")
+    for item in evidence[:5]:
+        if isinstance(item, dict):
+            lines.append(f"- {item.get('title') or item.get('id')}: {item.get('summary') or item.get('status')}")
+
+    caveats = []
+    if isinstance(review.get("caveats"), list):
+        caveats.extend(str(item) for item in review["caveats"] if item)
+    if isinstance(executive.get("limitations"), list):
+        caveats.extend(str(item) for item in executive["limitations"] if item)
+    if caveats:
+        lines.append("\nAssumptions / caveats:")
+        for item in caveats[:6]:
+            lines.append(f"- {item}")
+
+    return "\n".join(lines)
+
+
+def _first_items(primary: Any, fallback: Any, *, limit: int) -> list[Any]:
+    if isinstance(primary, list) and primary:
+        return primary[:limit]
+    if isinstance(fallback, list):
+        return fallback[:limit]
+    return []
 
 
 def _sign(key: bytes, message: str) -> bytes:
